@@ -252,6 +252,52 @@ function splitAV() {
   toast(n === 1 ? 'Rozdzielono — obraz i dźwięk to teraz osobne klipy' : `Rozdzielono ${n} klipy — obraz i dźwięk osobno`);
 }
 
+/* Rampa prędkości (time remapping z Premiere): klip dzielony na odcinki z płynnie zmienianą prędkością.
+   Każdy odcinek gra taki sam kawałek pliku, więc całość pokazuje ten sam materiał, tylko w innym tempie. */
+const RAMPS = {
+  dip: { name: 'Szybko → wolno → szybko', f: u => 0.3 + 2.7 * Math.pow(Math.abs(2 * u - 1), 1.6) },
+  bump: { name: 'Wolno → szybko → wolno', f: u => 3 - 2.7 * Math.pow(Math.abs(2 * u - 1), 1.6) },
+  up: { name: 'Przyspieszenie', f: u => 0.35 + 2.65 * u * u },
+  down: { name: 'Hamowanie', f: u => 3 - 2.65 * u * u },
+};
+function speedRamp(c, kind, n = 12) {
+  const R = RAMPS[kind];
+  if (!R || !isAV(c) || isLocked(c)) return;
+  const members = groupMembers(c).filter(x => isAV(x) && Math.abs(x.start - c.start) < EPS && Math.abs(x.dur - c.dur) < EPS);
+  const base = Math.abs(c.speed), sign = c.speed < 0 ? -1 : 1;
+  const chunk = c.dur * base / n; // tyle pliku gra każdy odcinek
+  const speeds = [...Array(n)].map((_, i) => clamp(base * R.f((i + 0.5) / n), SPEED_MIN, SPEED_MAX));
+  const total = speeds.reduce((a, s) => a + chunk / s, 0);
+  const delta = total - c.dur, oldEnd = clipEnd(c);
+  // reszta tych ścieżek przesuwa się o zmianę długości (jak „rozsuń” w Premiere); inne ścieżki zostają
+  const tracks = new Set(members.map(x => x.trackId));
+  const ids = new Set(members.map(x => x.id));
+  for (const y of state.clips) if (tracks.has(y.trackId) && !ids.has(y.id) && y.start >= oldEnd - EPS) y.start += delta;
+  const groups = [...Array(n)].map(() => (members.length > 1 ? uid('g') : null));
+  const out = [];
+  for (const x of members) {
+    let t = x.start;
+    state.clips = state.clips.filter(y => y.id !== x.id);
+    for (let i = 0; i < n; i++) {
+      const p = structuredClone(x);
+      p.id = uid('c');
+      p.start = t; p.dur = chunk / speeds[i]; p.speed = sign * speeds[i];
+      p.in = x.in + sign * chunk * i;
+      p.kf = {};
+      p.group = groups[i];
+      if (i > 0) { p.props.fadeIn = 0; if (isTransition(p.props.inType)) p.props.inType = 'fade'; }
+      if (i < n - 1) p.props.fadeOut = 0;
+      p.name = (x.name || clipLabel(x)) + (i ? '' : ' (rampa)');
+      t += p.dur;
+      state.clips.push(p);
+      out.push(p);
+    }
+  }
+  sel = new Set(out.map(x => x.id));
+  commit(); renderAll();
+  toast(`Rampa „${R.name}”: ${shortDur(c.dur)} → ${shortDur(total)}. Cofnij: ${keyLabel('undo')}`, 4500);
+}
+
 /* Zmiana prędkości, także na ujemną (wstecz). Klip zachowuje ten sam fragment pliku, a jego początek zostaje w miejscu.
    base: klipy sprzed przeciągania suwaka — ruch tam i z powrotem nie skraca wtedy klipu na stałe */
 function setSpeed(c, s, base = null) {
@@ -380,6 +426,46 @@ function addMarker(t = playhead) {
   state.markers.push({ id: uid('k'), t, label: '' });
   state.markers.sort((a, b) => a.t - b.t);
   commit(); drawRuler();
+}
+/* Rozdziały YouTube ze znaczników: lista „0:00 Tytuł” do wklejenia w opis filmu.
+   YouTube wymaga rozdziału od 0:00, co najmniej trzech i każdego dłuższego niż 10 s. */
+const chapTime = t => { t = Math.floor(t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`; };
+function chaptersText() {
+  const list = state.markers.filter(m => m.t < projectEnd()).map((m, i) => ({ t: m.t, label: (m.label || '').trim() || `Rozdział ${i + 1}` }));
+  if (!list.length || list[0].t >= 1) list.unshift({ t: 0, label: 'Wstęp' });
+  else list[0].t = 0;
+  const warn = [];
+  if (list.length < 3) warn.push('YouTube pokaże rozdziały dopiero od trzech — dodaj znaczniki (M) na początku kolejnych części.');
+  const short = list.filter((c, i) => ((list[i + 1]?.t ?? projectEnd()) - c.t) < 10);
+  if (short.length) warn.push(`Za krótkie (poniżej 10 s): ${short.map(c => `„${c.label}”`).join(', ')} — YouTube wymaga co najmniej 10 s.`);
+  if (state.markers.some(m => !m.label)) warn.push('Znaczniki bez nazwy dostały „Rozdział n” — nazwę zmienisz prawym przyciskiem na znaczniku.');
+  return { text: list.map(c => `${chapTime(c.t)} ${c.label}`).join('\n'), warn };
+}
+let chapDlg = null;
+function showChapters() {
+  if (!chapDlg) {
+    chapDlg = document.createElement('dialog');
+    chapDlg.className = 'dlg';
+    chapDlg.setAttribute('aria-labelledby', 'chapTitle');
+    chapDlg.innerHTML = `<h2 id="chapTitle">Rozdziały YouTube</h2>
+      <p class="hint">Lista powstała ze znaczników na osi czasu. Wklej ją w opis filmu na YouTube.</p>
+      <label class="sr-only" for="chapText">Rozdziały</label>
+      <textarea id="chapText" rows="9" readonly spellcheck="false"></textarea>
+      <div id="chapWarn" class="chap-warn"></div>
+      <div class="dlg-actions"><button type="button" class="btn" id="chapClose">Zamknij</button><button type="button" class="btn primary" id="chapCopy">Kopiuj</button></div>`;
+    document.body.appendChild(chapDlg);
+    $('#chapClose').addEventListener('click', () => chapDlg.close());
+    $('#chapCopy').addEventListener('click', async () => {
+      const ta = $('#chapText');
+      try { await navigator.clipboard.writeText(ta.value); } catch { ta.select(); document.execCommand('copy'); }
+      toast('Skopiowano rozdziały — wklej je w opis filmu');
+    });
+  }
+  const { text, warn } = chaptersText();
+  $('#chapText').value = text;
+  $('#chapWarn').innerHTML = warn.map(w => `<p class="hint">⚠ ${esc(w)}</p>`).join('');
+  chapDlg.showModal();
+  $('#chapCopy').focus();
 }
 function setRangeMark(which) {
   const r = state.range || { in: 0, out: projectEnd() };
@@ -902,6 +988,7 @@ rulerEl.addEventListener('contextmenu', e => {
     items.push('-');
   }
   items.push({ label: 'Dodaj znacznik tutaj', key: keyLabel('marker'), act: () => addMarker(t) });
+  items.push({ label: 'Rozdziały YouTube ze znaczników…', act: showChapters });
   items.push({ label: 'Początek zakresu tutaj', key: keyLabel('markIn'), act: () => { seek(t); setRangeMark('in'); } });
   items.push({ label: 'Koniec zakresu tutaj', key: keyLabel('markOut'), act: () => { seek(t); setRangeMark('out'); } });
   items.push({ label: 'Wyczyść zakres I–O', key: keyLabel('clearRange'), disabled: !state.range, act: () => { state.range = null; commit(); drawRuler(); renderHeads(); } });

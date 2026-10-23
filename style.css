@@ -1136,3 +1136,19 @@ body.is-recording .tool.rec { background: rgba(229, 57, 53, .22); border-color: 
 .rec-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rec-time { font: 700 18px var(--mono); color: var(--text); }
 .rec-btn.on + .rec-info .rec-time { color: #ff8a8a; }
+
+/* ========== Wskaźniki (Lumetri Scopes) ========== */
+.scopes {
+  position: fixed; left: 16px; bottom: 16px; z-index: 58; width: min(400px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+}
+.scopes[hidden] { display: none; }
+.sc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sc-head h2 { font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); margin: 0; flex: 1; }
+.sc-head select { width: auto; padding: 3px 6px; font-size: 12px; }
+#scCanvas { display: block; width: 100%; aspect-ratio: 680 / 440; border-radius: 6px; background: #0b0d11; }
+.sc-info { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+#btnScopes[aria-pressed="true"], #btnGuides[aria-pressed="true"] { color: var(--accent); }
+.spd-ramp-lbl { font-size: 12px; color: var(--muted); margin: 4px 0 5px; }
+#chapText { font: 13px/1.5 var(--mono); min-height: 160px; }
+.chap-warn .hint { margin: 6px 0 0; color: #f2c94c; }

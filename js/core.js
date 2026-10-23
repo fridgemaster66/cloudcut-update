@@ -152,12 +152,20 @@ function defaultTrack(kind) {
 
 /* ---------------- Właściwości klipów ---------------- */
 const FX0 = { brightness: 100, contrast: 100, saturate: 100, hue: 0, temp: 0, blur: 0, grayscale: 0, sepia: 0, vignette: 0 };
+/* Korekcja jak Lumetri (ekspozycja, światła, cienie, jaskrawość, tonowanie) i efekty jak w After Effects — liczone na karcie graficznej */
+const EFX0 = {
+  exposure: 0, highlights: 0, shadows: 0, vibrance: 0, tintS: '#2f6bff', tintSAmt: 0, tintH: '#ffb04a', tintHAmt: 0,
+  sharpen: 0, glow: 0, grain: 0, pixel: 0, rgb: 0, glitch: 0, wave: 0, posterize: 0, mirror: 'none', invert: false,
+};
+const efxActive = e => !!e && Object.keys(EFX0).some(k => e[k] !== undefined && e[k] !== EFX0[k] && !(k === 'tintS' || k === 'tintH'));
+/* Drżenie kamery (jak wiggle() w After Effects): siła w % kadru, częstotliwość w Hz, obrót w stopniach */
+const SHAKE0 = { amt: 0, freq: 3, rot: 0 };
 function visualProps() {
   return {
     opacity: 1, scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false, fit: 'contain',
     crop: { l: 0, r: 0, t: 0, b: 0 }, radius: 0, dropShadow: false, blend: 'source-over', kfEase: 'smooth',
     mask: { type: 'none', x: 0, y: 0, w: 60, h: 60, feather: 0, invert: false, round: 0 }, lut: null,
-    fx: { ...FX0 }, key: { on: false, color: '#00d046', tol: 28, soft: 12 },
+    fx: { ...FX0 }, efx: { ...EFX0 }, shake: { ...SHAKE0 }, key: { on: false, color: '#00d046', tol: 28, soft: 12 },
     inType: 'fade', outType: 'fade', fadeIn: 0, fadeOut: 0,
   };
 }

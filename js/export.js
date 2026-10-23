@@ -212,13 +212,15 @@ async function openExport() {
   if (!expDlg.open) expDlg.showModal();
 }
 function setExpForm(on) {
-  for (const id of ['#expFmt', '#expRange', '#expQuality', '#expComp']) $(id).disabled = !on;
+  for (const id of ['#expFmt', '#expRange', '#expQuality', '#expComp', '#expLoud']) $(id).disabled = !on;
   $('#expFps').disabled = !on || kindOfFormat(FMT_BY_ID.get($('#expFmt').value)) !== 'video';
   $('#expStart').disabled = !on;
   if (on) updateExpInfo();
 }
 $('#expFmt').addEventListener('change', () => { lastFmt = $('#expFmt').value; try { localStorage.setItem('cloudcut-export-fmt', lastFmt); } catch { /* brak */ } refreshExportForm(); });
 for (const id of ['#expRange', '#expFps', '#expQuality']) $(id).addEventListener('change', updateExpInfo);
+try { $('#expLoud').value = localStorage.getItem('cloudcut-export-loud') || '0'; } catch { /* bez zapisu */ }
+$('#expLoud').addEventListener('change', e => { try { localStorage.setItem('cloudcut-export-loud', e.target.value); } catch { /* bez zapisu */ } });
 
 /* =========================================================
    Wspólne narzędzia eksportu
@@ -395,7 +397,7 @@ async function fastExport(f, rng, fps, comp, qual) {
     output.addAudioTrack(aSrc);
   }
   progress(0.01, 'Liczenie dźwięku…');
-  const mix = caps.a ? await renderAudioMix(rng.in, rng.out) : null;
+  const mix = caps.a ? await exportMix(rng.in, rng.out) : null;
   await output.start();
   const sliceOf = (a, b) => {
     // fragment miksu [a, b) jako osobny AudioBuffer (dokładany po kolei do kodera)
@@ -465,6 +467,60 @@ async function decodedBuffer(mediaId) {
   const p = m?.blob ? m.blob.arrayBuffer().then(ab => ensureAudio().decodeAudioData(ab)).catch(() => null) : Promise.resolve(null);
   decoded.set(mediaId, p);
   return p;
+}
+/* Głośność zintegrowana (LUFS, ITU-R BS.1770): filtr K, bloki 400 ms, bramka −70 LUFS i względna −10 LU */
+async function measureLufs(buf) {
+  const oac = new OfflineAudioContext(buf.numberOfChannels, buf.length, buf.sampleRate);
+  const src = oac.createBufferSource();
+  src.buffer = buf;
+  const shelf = oac.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 1681; shelf.gain.value = 4;
+  const hp = oac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 38; hp.Q.value = 0.5;
+  src.connect(shelf).connect(hp).connect(oac.destination);
+  src.start();
+  const k = await oac.startRendering();
+  const hop = Math.round(0.1 * k.sampleRate), nh = Math.floor(k.length / hop);
+  const chs = [...Array(k.numberOfChannels)].map((_, i) => k.getChannelData(i));
+  const hs = new Float64Array(nh);
+  for (let h = 0; h < nh; h++) { let e = 0; for (const d of chs) for (let i = h * hop, z = i + hop; i < z; i++) e += d[i] * d[i]; hs[h] = e; }
+  const blocks = [];
+  for (let h = 0; h + 4 <= nh; h++) blocks.push((hs[h] + hs[h + 1] + hs[h + 2] + hs[h + 3]) / (4 * hop));
+  const L = z => -0.691 + 10 * Math.log10(z);
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const abs = blocks.filter(z => z > 0 && L(z) > -70);
+  if (!abs.length) return -Infinity;
+  const rel = L(mean(abs)) - 10;
+  const gated = abs.filter(z => L(z) > rel);
+  return L(mean(gated.length ? gated : abs));
+}
+/* Wyrównanie do docelowej głośności; szczyty miękko ograniczone do −1 dBFS, żeby podgłośnienie nie przesterowało */
+async function loudnessNormalize(buf, target) {
+  const lufs = await measureLufs(buf);
+  if (!isFinite(lufs)) return { lufs, gainDb: 0 };
+  let peak = 0;
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) for (const v of buf.getChannelData(ch)) { const a = Math.abs(v); if (a > peak) peak = a; }
+  const C = 0.891, T = 0.75; // sufit −1 dBFS, od 0,75 łagodne zaokrąglanie
+  let gainDb = target - lufs;
+  const room = 20 * Math.log10(C / Math.max(peak, 1e-6));
+  const limited = gainDb > room + 6;
+  if (limited) gainDb = room + 6; // więcej niż 6 dB ponad szczyt zniekształciłoby dźwięk
+  const g = Math.pow(10, gainDb / 20);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) {
+      const x = d[i] * g, a = Math.abs(x);
+      d[i] = a <= T ? x : Math.sign(x) * (T + (C - T) * Math.tanh((a - T) / (C - T)));
+    }
+  }
+  return { lufs, gainDb, limited };
+}
+async function exportMix(from, to) {
+  const mix = await renderAudioMix(from, to);
+  const target = +($('#expLoud')?.value || 0);
+  if (!target || !mix) return mix;
+  const r = await loudnessNormalize(mix, target);
+  const f1 = v => v.toFixed(1).replace('.', ',').replace('-', '−');
+  if (isFinite(r.lufs)) toast(`Głośność: ${f1(r.lufs)} → ${r.limited ? 'ok. ' + f1(r.lufs + r.gainDb) : f1(target)} LUFS${r.limited ? ' (ograniczone, żeby nie przesterować)' : ''}`, 6000);
+  return mix;
 }
 async function renderAudioMix(from, to, sr = 48000) {
   const len = Math.max(1, Math.ceil((to - from) * sr));
@@ -775,7 +831,7 @@ $('#expStart').addEventListener('click', async () => {
       finishWith(blob, `${safeName($('#projName').value)} ${tc(prevHead).replace(/:/g, '-')}.${f.ext}`);
     } else if (f.type === 'wav') {
       progress(0.1, 'Liczenie dźwięku…');
-      const buf = await renderAudioMix(rng.in, rng.out);
+      const buf = await exportMix(rng.in, rng.out);
       if (exporting.cancelled) throw new Error('przerwano');
       finishWith(encodeWav(buf, +qual), exportName('wav'));
     } else {
@@ -808,7 +864,7 @@ $('#expStart').addEventListener('click', async () => {
       else if (zip) blob = zip.finish();
       else {
         progress(0.92, 'Liczenie dźwięku…');
-        const audio = await renderAudioMix(rng.in, rng.out);
+        const audio = await exportMix(rng.in, rng.out);
         blob = buildAvi(frames, W, H, fps, pcm16(audio));
       }
       finishWith(blob, exportName(f.ext));

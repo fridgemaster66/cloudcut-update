@@ -338,10 +338,25 @@ const FMT = {
   pct: v => Math.round(v * 100) + '%', pc: v => Math.round(v) + '%', px: v => Math.round(v) + ' px',
   deg: v => Math.round(v) + '°', s: v => (+v).toFixed(1) + ' s', n: v => String(Math.round(v * 100) / 100), x: v => (+v).toFixed(2) + '×',
 };
-const inspClosed = new Set(['crop', 'key']);
+const inspClosed = new Set(['crop', 'key', 'lumetri', 'efx']); // sekcje zwinięte na start
 const IN_TYPES = [['fade', 'Pojawienie'], ['slide-l', 'Wjazd z lewej'], ['slide-r', 'Wjazd z prawej'], ['slide-u', 'Wjazd z góry'], ['slide-d', 'Wjazd z dołu'], ['zoom-in', 'Powiększenie'], ['zoom-out', 'Najazd z bliska'], ['wipe', 'Odsłonięcie'], ['blur', 'Wyostrzenie'], ['pop', 'Wyskok'], ['spin', 'Obrót'], ['type', 'Maszyna do pisania (napis)']];
 const OUT_TYPES = [['fade', 'Zniknięcie'], ['slide-l', 'Wyjazd w lewo'], ['slide-r', 'Wyjazd w prawo'], ['slide-u', 'Wyjazd w górę'], ['slide-d', 'Wyjazd w dół'], ['zoom-in', 'Pomniejszenie'], ['zoom-out', 'Odjazd'], ['wipe', 'Zasłonięcie'], ['blur', 'Rozmycie'], ['spin', 'Obrót']];
-const BLENDS = [['source-over', 'Normalny'], ['multiply', 'Mnożenie'], ['screen', 'Rozjaśnianie'], ['overlay', 'Nakładka'], ['soft-light', 'Łagodne światło'], ['lighten', 'Jaśniejszy'], ['darken', 'Ciemniejszy'], ['difference', 'Różnica']];
+const BLENDS = [['source-over', 'Normalny'], ['multiply', 'Mnożenie'], ['screen', 'Rozjaśnianie'], ['overlay', 'Nakładka'], ['soft-light', 'Łagodne światło'],
+  ['hard-light', 'Ostre światło'], ['color-dodge', 'Rozjaśnianie kolorem'], ['color-burn', 'Ściemnianie kolorem'], ['lighten', 'Jaśniejszy'], ['darken', 'Ciemniejszy'],
+  ['difference', 'Różnica'], ['exclusion', 'Wykluczenie'], ['hue', 'Barwa'], ['saturation', 'Nasycenie'], ['color', 'Kolor'], ['luminosity', 'Jasność'],
+  // maska ścieżki (track matte z After Effects): ten klip decyduje, gdzie widać ścieżki pod nim
+  ['destination-in', 'Maska ścieżki — niższe ścieżki tylko w tym kształcie'], ['destination-out', 'Maska ścieżki — wytnij ten kształt z niższych ścieżek']];
+/* Gotowe zestawy efektów (After Effects / Lumetri) */
+const EFX_PRESETS = [
+  ['VHS', { grain: 35, rgb: 22, glitch: 12, wave: 6, vibrance: -20 }],
+  ['Glitch', { glitch: 70, rgb: 30 }],
+  ['Kino', { tintS: '#1f7a8c', tintSAmt: 35, tintH: '#ffad5c', tintHAmt: 30, highlights: -20, shadows: 10, grain: 12 }],
+  ['Sen', { glow: 60, highlights: 15, vibrance: 20 }],
+  ['Ostry obraz', { sharpen: 45, vibrance: 25 }],
+  ['Cenzura', { pixel: 40 }],
+  ['Komiks', { posterize: 70, sharpen: 60, vibrance: 40 }],
+  ['Kalejdoskop', { mirror: 'q' }],
+];
 /* Suwak prędkości: w prawo do 100×, w lewo wstecz do −100×, środek = najwolniej (0,1×); skala logarytmiczna,
    więc zakres 0,5–4× zajmuje tyle miejsca co 10–100× */
 const SPEED_POS = 1000, SPEED_LOG = Math.log(SPEED_MAX / SPEED_MIN);
@@ -368,6 +383,8 @@ function speedField(c) {
         ${[0.5, 1, 2, 4, 10].map(v => `<button type="button" class="chip" data-spd="${v * sign}" aria-pressed="${Math.abs(s) === v}">${fmtSpeed(v)}×</button>`).join('')}
       </div>
       <p class="hint" id="spdHint">${speedHint(s)}</p>
+      <div class="lbl spd-ramp-lbl">Rampa prędkości</div>
+      <div class="chips">${Object.entries(RAMPS).map(([k, r]) => `<button type="button" class="chip" data-ramp="${k}" title="Dzieli klip na odcinki z płynnie zmienianą prędkością">${r.name}</button>`).join('')}</div>
     </div>`;
 }
 function speedHint(s) {
@@ -621,6 +638,41 @@ function clipInspector(c) {
       ${ctlRange(c, 'fx.sepia', 'Sepia', 0, 100, 1, 'pc')}
       <button class="btn small" data-act="resetfx">Wyzeruj kolor</button>`);
   }
+  if (['video', 'image', 'adjust'].includes(c.kind)) {
+    P.efx ??= { ...EFX0 };
+    h += sec('lumetri', 'Korekcja barwna (Lumetri)', `
+      ${ctlRange(c, 'efx.exposure', 'Ekspozycja', -100, 100, 1, 'n')}
+      ${ctlRange(c, 'efx.highlights', 'Światła', -100, 100, 1, 'n')}
+      ${ctlRange(c, 'efx.shadows', 'Cienie', -100, 100, 1, 'n')}
+      ${ctlRange(c, 'efx.vibrance', 'Jaskrawość', -100, 100, 1, 'n')}
+      <h4 class="sub-h">Tonowanie (kolor cieni i świateł)</h4>
+      <div class="row2">${ctlColor(c, 'efx.tintS', 'Kolor cieni')}${ctlColor(c, 'efx.tintH', 'Kolor świateł')}</div>
+      <div class="row2">${ctlRange(c, 'efx.tintSAmt', 'Siła w cieniach', 0, 100, 1, 'pc')}${ctlRange(c, 'efx.tintHAmt', 'Siła w światłach', 0, 100, 1, 'pc')}</div>
+      <p class="hint">Wskaźniki (histogram, przebieg, wektorskop) otworzysz przyciskiem nad podglądem.</p>
+      <button class="btn small" data-act="resetlum">Wyzeruj korekcję</button>`);
+  }
+  if (isVisual(c)) {
+    const bitmap = ['video', 'image', 'adjust'].includes(c.kind);
+    P.shake ??= { ...SHAKE0 };
+    h += sec('efx', bitmap ? 'Efekty (jak w After Effects)' : 'Drżenie kamery', `
+      ${bitmap ? `<div class="chips">${EFX_PRESETS.map(([n], i) => `<button class="chip" data-efxp="${i}">${n}</button>`).join('')}</div>
+      ${ctlRange(c, 'efx.sharpen', 'Wyostrzenie', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'efx.glow', 'Poświata', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'efx.grain', 'Ziarno filmowe', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'efx.pixel', 'Mozaika (piksele)', 0, 100, 1, 'px')}
+      ${ctlRange(c, 'efx.rgb', 'Przesunięcie RGB', 0, 100, 1, 'px')}
+      ${ctlRange(c, 'efx.glitch', 'Glitch', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'efx.wave', 'Falowanie', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'efx.posterize', 'Posteryzacja', 0, 100, 1, 'pc')}
+      ${ctlSelect(c, 'efx.mirror', 'Lustro', [['none', 'Brak'], ['h', 'Lewa połowa odbita w prawo'], ['v', 'Górna połowa odbita w dół'], ['q', 'Kalejdoskop (4 ćwiartki)']])}
+      ${ctlCheck(c, 'efx.invert', 'Negatyw')}
+      <h4 class="sub-h">Drżenie kamery</h4>` : ''}
+      ${ctlRange(c, 'shake.amt', 'Siła drgań', 0, 100, 1, 'pc')}
+      ${ctlRange(c, 'shake.freq', 'Częstotliwość', 0.5, 15, 0.5, 'n')}
+      ${ctlRange(c, 'shake.rot', 'Kołysanie (obrót)', 0, 100, 1, 'pc')}
+      <p class="hint">${bitmap ? 'Efekty na warstwie korekcyjnej działają na wszystko pod nią — z maską np. zamażesz twarz mozaiką. ' : ''}Drżenie to „wiggle” z After Effects: płynne, losowe ruchy kamery (częstotliwość w drganiach na sekundę).</p>
+      <button class="btn small" data-act="resetefx">${bitmap ? 'Wyzeruj efekty' : 'Wyłącz drżenie'}</button>`);
+  }
   if (c.kind === 'video' || c.kind === 'image') {
     h += sec('key', 'Kluczowanie koloru (green screen)', `
       ${ctlCheck(c, 'key.on', 'Usuń tło w kolorze')}
@@ -814,6 +866,20 @@ inspEl.addEventListener('click', async e => {
     if (toggleKf(c, kb.dataset.kfbtn)) { commit(); renderInspector(); renderLanes(); drawFrame(); }
     return;
   }
+  const rampBtn = e.target.closest('[data-ramp]');
+  if (rampBtn) { const rc = single(); if (rc) speedRamp(rc, rampBtn.dataset.ramp); return; }
+  const efxp = e.target.closest('[data-efxp]');
+  if (efxp) {
+    // zestaw zastępuje efekty stylizacji, korekcję zostawia (poza tym, co zestaw sam ustawia)
+    const [, preset] = EFX_PRESETS[+efxp.dataset.efxp];
+    for (const x of selectedClips()) {
+      if (!['video', 'image', 'adjust'].includes(x.kind)) continue;
+      const keep = Object.fromEntries(['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt'].map(k => [k, x.props.efx?.[k] ?? EFX0[k]]));
+      x.props.efx = { ...EFX0, ...keep, ...preset };
+    }
+    commit(); renderInspector(); drawFrame();
+    return;
+  }
   if (look) {
     const L = LOOKS.find(l => l.key === look.dataset.look);
     for (const x of selectedClips()) if (x.props.fx) x.props.fx = { ...FX0, ...L.fx };
@@ -855,6 +921,15 @@ inspEl.addEventListener('click', async e => {
   else if (act === 'normalize' && c) normalizeClip(c);
   else if (act === 'mute' && c) { delete c.kf.volume; c.props.volume = 0; commit(); renderInspector(); }
   else if (act === 'resetfx' && c) { c.props.fx = { ...FX0 }; c.props.lut = null; commit(); renderInspector(); drawFrame(); }
+  else if (act === 'resetlum' && c) {
+    for (const k of ['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt']) c.props.efx[k] = EFX0[k];
+    commit(); renderInspector(); drawFrame();
+  } else if (act === 'resetefx' && c) {
+    const keep = Object.fromEntries(['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt'].map(k => [k, c.props.efx?.[k] ?? EFX0[k]]));
+    c.props.efx = { ...EFX0, ...keep };
+    c.props.shake = { ...SHAKE0 };
+    commit(); renderInspector(); drawFrame();
+  }
   else if (act === 'resetafx' && c) { c.props.afx = { ...AFX0 }; commit(); renderInspector(); syncMedia(); }
   else if (act === 'saveasset' && c) saveClipAsAsset(c);
   else if (act === 'savelook' && c) saveLookAsAsset(c);
@@ -1025,6 +1100,7 @@ $('#btnSnap').addEventListener('click', toggleSnap);
 $('#btnFit').addEventListener('click', zoomFit);
 $('#zoom').addEventListener('input', e => setZoom(sliderToPps(+e.target.value)));
 $('#btnGuides').addEventListener('click', toggleGuides);
+$('#btnScopes').addEventListener('click', () => toggleScopes());
 $('#btnSnapshot').addEventListener('click', snapshotPng);
 $('#btnFull').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();

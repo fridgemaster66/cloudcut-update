@@ -370,6 +370,14 @@ function drawFrame() {
       if (tr2?.role === 'in') drawTransitionOverlay(tr2);
     }
   }
+  // maska ścieżki (tryb „pokaż niższe ścieżki tylko w tym kształcie”) zostawia przezroczystość — pod nią kolor tła projektu
+  ctx = mainCtx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.fillStyle = state.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'source-over';
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawOverlay();
   updateClock();
@@ -785,6 +793,18 @@ function maskPath(mask, R) {
   else ctx.roundRect(cx - w / 2, cy - h / 2, w, h, Math.min(mask.round || 0, w / 2, h / 2));
 }
 
+/* Drżenie kamery: płynny szum (dwie oktawy) zamiast losowych skoków — jak wiggle(freq, amp) w After Effects */
+function wiggleNoise(x, seed) {
+  const h = i => { const s = Math.sin(i * 127.1 + seed * 311.7) * 43758.5453; return (s - Math.floor(s)) * 2 - 1; };
+  const n = x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return h(i) + (h(i + 1) - h(i)) * u; };
+  return n(x) * 0.7 + n(x * 2.3 + 17) * 0.3;
+}
+function shakeAt(s, t, id) {
+  let seed = 0;
+  for (const ch of String(id)) seed = (seed * 31 + ch.charCodeAt(0)) % 997;
+  const f = Math.max(0.1, s.freq || 3) * t, a = (s.amt || 0) / 100 * 0.05;
+  return { dx: wiggleNoise(f, seed + 1) * a, dy: wiggleNoise(f, seed + 2) * a, rot: wiggleNoise(f, seed + 3) * (s.rot || 0) / 100 * 6 };
+}
 function drawVisual(c, t, tailMode, trans) {
   const P = c.props;
   const W = state.w, H = state.h;
@@ -820,6 +840,12 @@ function drawVisual(c, t, tailMode, trans) {
     const m = transitionMods(trans);
     ox += m.dx; oy += m.dy; sc *= m.sc; alpha *= m.alpha; blurAdd += m.blur; rot += m.rot;
     transMask = m.mask; extraFilter = m.filter;
+  }
+  if (P.shake?.amt > 0 || P.shake?.rot > 0) {
+    const sh = shakeAt(P.shake, local, c.id);
+    ox += sh.dx * W; oy += sh.dy * H; rot += sh.rot;
+    // film i zdjęcie lekko powiększone, żeby przy drganiu nie było widać krawędzi kadru
+    if (c.kind === 'video' || c.kind === 'image' || c.kind === 'adjust') sc *= 1 + (P.shake.amt || 0) / 100 * 0.12 + Math.abs(P.shake.rot || 0) / 100 * 0.06;
   }
   if (alpha <= 0.002 || sc <= 0.002) return;
 
@@ -860,7 +886,7 @@ function drawVisual(c, t, tailMode, trans) {
     if (cw < 1 || ch < 1) return;
     R = { x: -fw / 2 + fw * cr.l / 100, y: -fh / 2 + fh * cr.t / 100, w: fw * cw / sw, h: fh * ch / sh };
     paint = () => {
-      const gpu = (P.lut?.id || P.key?.on) && typeof gpuEffects === 'function' ? gpuEffects(src, sx, sy, cw, ch, P) : null;
+      const gpu = (P.lut?.id || P.key?.on || efxActive(P.efx)) && typeof gpuEffects === 'function' ? gpuEffects(src, sx, sy, cw, ch, P, local) : null;
       if (gpu) ctx.drawImage(gpu, 0, 0, gpu.width, gpu.height, R.x, R.y, R.w, R.h);
       else if (P.key?.on) {
         const kc = chromaKey(src, sx, sy, cw, ch, P.key);

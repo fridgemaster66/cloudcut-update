@@ -118,6 +118,9 @@
           <option value="0.5">Połowa</option>
           <option value="0.25">Ćwierć</option>
         </select>
+        <button class="icon-btn" id="btnScopes" aria-pressed="false" title="Wskaźniki: histogram, przebieg, parada RGB, wektorskop" aria-label="Wskaźniki obrazu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M5 20V12M9 20V6M13 20v-9M17 20V9M21 20v-4"/></svg>
+        </button>
         <button class="icon-btn" id="btnGuides" aria-pressed="false" title="Siatka i strefy bezpieczne (G)" aria-label="Siatka i strefy bezpieczne">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
         </button>
@@ -296,6 +299,13 @@
         <option value="3">Mały plik</option>
       </select></div>
   </div>
+  <div class="field" id="expLoudWrap"><label for="expLoud">Głośność (normalizacja jak w Premiere)</label>
+    <select id="expLoud">
+      <option value="0">Bez zmian</option>
+      <option value="-14">−14 LUFS — YouTube, Spotify, TikTok</option>
+      <option value="-16">−16 LUFS — podcasty, Apple</option>
+      <option value="-23">−23 LUFS — telewizja (EBU R128)</option>
+    </select></div>
   <p class="hint" id="expInfo"></p>
   <div class="progress" id="expProgress" hidden><div class="bar" id="expBar"></div></div>
   <p class="hint" id="expStatus" aria-live="polite"></p>
@@ -710,6 +720,7 @@
 <script src="js/updates.js"></script>
 <script src="js/library.js"></script>
 <script src="js/record.js"></script>
+<script src="js/scopes.js"></script>
 <script src="js/keys.js"></script>
 </body>
 </html>

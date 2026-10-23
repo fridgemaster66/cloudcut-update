@@ -22,9 +22,36 @@ function initGL() {
       uniform sampler2D src; uniform sampler3D lut;
       uniform vec4 crop; uniform bool useLut; uniform float lutAmt; uniform float lutSize;
       uniform bool useKey; uniform vec3 keyCol; uniform float tol; uniform float soft;
+      uniform bool useFx; uniform vec2 texel; uniform float time; uniform float pxk;
+      uniform float exposure, highlights, shadows, vibrance, sharpen, glow, grain, pixel, rgbs, glitch, wave, posterize;
+      uniform vec4 tintS, tintH; uniform int mirror; uniform bool invert;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      vec4 tap(vec2 q) { return texture(src, vec2(crop.x + q.x * crop.z, crop.y + q.y * crop.w)); }
       void main() {
-        vec2 uv = vec2(crop.x + v.x * crop.z, crop.y + v.y * crop.w);
-        vec4 c = texture(src, uv);
+        vec2 q = v; // położenie w kadrze klipu 0–1 (y od dołu)
+        float rs = 0.0;
+        if (useFx) {
+          if (mirror == 1 || mirror == 3) q.x = q.x < 0.5 ? q.x : 1.0 - q.x;
+          if (mirror == 2 || mirror == 3) q.y = q.y > 0.5 ? q.y : 1.0 - q.y;
+          if (wave > 0.0) q.x += sin(q.y * 22.0 + time * 5.0) * wave * 0.0005;
+          if (glitch > 0.0) {
+            float slot = floor(time * 14.0), band = floor(q.y * 28.0);
+            if (hash(vec2(band, slot)) > 1.0 - glitch * 0.004) q.x += (hash(vec2(band + 7.0, slot)) - 0.5) * glitch * 0.003;
+            rs += glitch * (hash(vec2(slot, 3.0)) > 0.7 ? 0.6 : 0.15);
+          }
+          if (pixel > 0.0) { vec2 cells = max(vec2(1.0), crop.zw / texel / pixel); q = (floor(q * cells) + 0.5) / cells; }
+          q = clamp(q, 0.0, 1.0);
+          rs += rgbs;
+        }
+        vec4 c = tap(q);
+        if (useFx) {
+          if (rs > 0.0) { vec2 d = vec2(rs * 0.5 * texel.x / crop.z, 0.0); c.r = tap(q + d).r; c.b = tap(q - d).b; }
+          if (sharpen > 0.0) {
+            vec2 dx = vec2(texel.x / crop.z, 0.0), dy = vec2(0.0, texel.y / crop.w);
+            vec3 blur = (tap(q + dx).rgb + tap(q - dx).rgb + tap(q + dy).rgb + tap(q - dy).rgb) * 0.25;
+            c.rgb += (c.rgb - blur) * sharpen * 0.03;
+          }
+        }
         float a = c.a;
         if (useKey) {
           vec3 p = c.rgb * 255.0, k = keyCol * 255.0;
@@ -44,6 +71,29 @@ function initGL() {
         if (useLut) {
           vec3 lc = clamp(c.rgb, 0.0, 1.0) * ((lutSize - 1.0) / lutSize) + 0.5 / lutSize;
           c.rgb = mix(c.rgb, texture(lut, lc).rgb, lutAmt);
+        }
+        if (useFx) {
+          c.rgb *= exp2(exposure / 50.0);
+          float L = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+          c.rgb += shadows / 100.0 * 0.45 * (1.0 - smoothstep(0.0, 0.55, L));
+          c.rgb += highlights / 100.0 * 0.45 * smoothstep(0.45, 1.0, L);
+          L = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+          float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+          c.rgb = mix(vec3(L), c.rgb, 1.0 + vibrance / 100.0 * (1.0 - clamp(sat, 0.0, 1.0)));
+          c.rgb += (tintS.rgb - 0.5) * tintS.a * (1.0 - clamp(L, 0.0, 1.0)) * 0.7;
+          c.rgb += (tintH.rgb - 0.5) * tintH.a * clamp(L, 0.0, 1.0) * 0.7;
+          if (glow > 0.0) {
+            vec3 g = vec3(0.0);
+            for (int i = 0; i < 12; i++) {
+              float an = float(i) * 0.5236, r = (glow * 0.35 + 2.0) * pxk * (1.0 + float(i % 3));
+              g += max(tap(q + vec2(cos(an), sin(an)) * r * texel / crop.zw).rgb - 0.55, 0.0);
+            }
+            c.rgb += g / 12.0 * glow * 0.045;
+          }
+          if (posterize > 0.0) { float n = mix(24.0, 2.0, posterize / 100.0); c.rgb = floor(clamp(c.rgb, 0.0, 1.0) * n + 0.5) / n; }
+          if (invert) c.rgb = 1.0 - c.rgb;
+          if (grain > 0.0) c.rgb += (hash(gl_FragCoord.xy + fract(time * 23.0) * 91.0) - 0.5) * grain / 100.0 * 0.32;
+          c.rgb = clamp(c.rgb, 0.0, 1.0);
         }
         o = vec4(c.rgb * a, a);
       }`;
@@ -65,7 +115,9 @@ function initGL() {
     const loc = gl.getAttribLocation(glProg, 'p');
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    glU = Object.fromEntries(['src', 'lut', 'crop', 'useLut', 'lutAmt', 'lutSize', 'useKey', 'keyCol', 'tol', 'soft'].map(n => [n, gl.getUniformLocation(glProg, n)]));
+    glU = Object.fromEntries(['src', 'lut', 'crop', 'useLut', 'lutAmt', 'lutSize', 'useKey', 'keyCol', 'tol', 'soft',
+      'useFx', 'texel', 'time', 'pxk', 'exposure', 'highlights', 'shadows', 'vibrance', 'sharpen', 'glow', 'grain', 'pixel', 'rgbs', 'glitch', 'wave',
+      'posterize', 'tintS', 'tintH', 'mirror', 'invert'].map(n => [n, gl.getUniformLocation(glProg, n)]));
     glSrcTex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, glSrcTex);
@@ -93,11 +145,13 @@ function glLutTexture(id) {
   glLuts.set(id, e);
   return e;
 }
-function gpuEffects(src, sx, sy, cw, ch, P) {
+/* t: czas od początku klipu (ziarno, glitch i falowanie zmieniają się w czasie) */
+function gpuEffects(src, sx, sy, cw, ch, P, t = 0) {
   if (!initGL()) return null;
   const lutE = P.lut?.id ? glLutTexture(P.lut.id) : null;
   const key = P.key?.on ? P.key : null;
-  if (!lutE && !key) return null;
+  const e = efxActive(P.efx) ? P.efx : null;
+  if (!lutE && !key && !e) return null;
   const sw = src.videoWidth || src.naturalWidth || src.width, sh = src.videoHeight || src.naturalHeight || src.height;
   if (!sw || !sh) return null;
   const k = Math.min(1, 2048 / Math.max(cw, ch));
@@ -125,6 +179,23 @@ function gpuEffects(src, sx, sy, cw, ch, P) {
     gl.uniform3f(glU.keyCol, r / 255, g / 255, b / 255);
     gl.uniform1f(glU.tol, key.tol);
     gl.uniform1f(glU.soft, key.soft);
+  }
+  gl.uniform1i(glU.useFx, e ? 1 : 0);
+  if (e) {
+    // efekty w pikselach liczymy względem kadru projektu, żeby wyglądały tak samo przy każdej rozdzielczości pliku
+    const pk = Math.max(cw / state.w, ch / state.h, 0.05);
+    gl.uniform2f(glU.texel, 1 / sw, 1 / sh);
+    gl.uniform1f(glU.time, t);
+    for (const n of ['exposure', 'highlights', 'shadows', 'vibrance', 'sharpen', 'grain', 'glitch', 'wave', 'posterize']) gl.uniform1f(glU[n], +e[n] || 0);
+    gl.uniform1f(glU.glow, +e.glow || 0);
+    gl.uniform1f(glU.pxk, pk);
+    gl.uniform1f(glU.pixel, (+e.pixel || 0) * pk);
+    gl.uniform1f(glU.rgbs, (+e.rgb || 0) * pk);
+    const tint = (hex, amt) => { const [r, g, b] = hexRgb(hex || '#808080'); return [r / 255, g / 255, b / 255, clamp((+amt || 0) / 100, 0, 1)]; };
+    gl.uniform4f(glU.tintS, ...tint(e.tintS, e.tintSAmt));
+    gl.uniform4f(glU.tintH, ...tint(e.tintH, e.tintHAmt));
+    gl.uniform1i(glU.mirror, { h: 1, v: 2, q: 3 }[e.mirror] || 0);
+    gl.uniform1i(glU.invert, e.invert ? 1 : 0);
   }
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
@@ -610,6 +681,8 @@ function openProMenu(anchor) {
     { label: 'Ścisz muzykę pod głosem (ducking)', act: autoDuck },
     { label: 'Wyrównaj głośność wszystkich klipów', act: normalizeAll },
     { label: 'Odwróć klip (od końca)', act: reverseClip },
+    { label: 'Rozdziały YouTube ze znaczników…', act: showChapters },
+    { label: 'Wskaźniki obrazu (histogram, wektorskop)…', act: toggleScopes },
     '-',
     { label: 'Mikser audio…', key: keyLabel('mixer'), act: openMixer },
     { label: 'Importuj LUT (.cube)…', act: () => $('#lutInput').click() },
