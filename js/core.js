@@ -157,6 +157,7 @@ const EFX0 = {
   exposure: 0, highlights: 0, shadows: 0, vibrance: 0, tintS: '#2f6bff', tintSAmt: 0, tintH: '#ffb04a', tintHAmt: 0,
   sharpen: 0, glow: 0, grain: 0, pixel: 0, rgb: 0, glitch: 0, wave: 0, posterize: 0, mirror: 'none', invert: false,
 };
+const LUM_KEYS = ['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt']; // część „Lumetri”
 const efxActive = e => !!e && Object.keys(EFX0).some(k => e[k] !== undefined && e[k] !== EFX0[k] && !(k === 'tintS' || k === 'tintH'));
 /* Drżenie kamery (jak wiggle() w After Effects): siła w % kadru, częstotliwość w Hz, obrót w stopniach */
 const SHAKE0 = { amt: 0, freq: 3, rot: 0 };

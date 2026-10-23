@@ -504,11 +504,12 @@ async function loudnessNormalize(buf, target) {
   const limited = gainDb > room + 6;
   if (limited) gainDb = room + 6; // więcej niż 6 dB ponad szczyt zniekształciłoby dźwięk
   const g = Math.pow(10, gainDb / 20);
+  const clip = peak * g > C; // ogranicznik tylko wtedy, gdy po wzmocnieniu szczyty przekroczyłyby −1 dBFS
   for (let ch = 0; ch < buf.numberOfChannels; ch++) {
     const d = buf.getChannelData(ch);
     for (let i = 0; i < d.length; i++) {
       const x = d[i] * g, a = Math.abs(x);
-      d[i] = a <= T ? x : Math.sign(x) * (T + (C - T) * Math.tanh((a - T) / (C - T)));
+      d[i] = !clip || a <= T ? x : Math.sign(x) * (T + (C - T) * Math.tanh((a - T) / (C - T)));
     }
   }
   return { lufs, gainDb, limited };

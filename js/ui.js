@@ -402,7 +402,14 @@ function showSpeed(s) {
 }
 let speedBase = null; // klipy sprzed przeciągania suwaka prędkości
 
-const single = () => (sel.size === 1 ? clipById([...sel][0]) : null);
+/* Klip, którego właściwości pokazuje inspektor: jedyny zaznaczony albo — gdy zaznaczona jest jedna połączona para
+   obraz+dźwięk — jej obraz (prędkość i przycinanie i tak zmieniają się w całej parze) */
+function single() {
+  if (sel.size === 1) return clipById([...sel][0]);
+  const s = [...sel].map(clipById).filter(Boolean);
+  if (s.length < 2 || !s[0].group || s.some(c => c.group !== s[0].group) || groupMembers(s[0]).length !== s.length) return null;
+  return s.find(isVisual) || s[0];
+}
 const fid = path => 'p-' + path.replace(/\./g, '-');
 const opts = (list, v) => list.map(([k, l]) => `<option value="${k}"${String(k) === String(v) ? ' selected' : ''}>${l}</option>`).join('');
 function sec(id, title, body) {
@@ -482,7 +489,8 @@ function renderInspector() {
   const box = $('#inspector');
   const focusId = box.contains(document.activeElement) ? document.activeElement.id : null;
   const st = box.scrollTop;
-  box.innerHTML = sel.size === 1 ? clipInspector(single()) : sel.size > 1 ? multiInspector() : projectInspector();
+  const one = single();
+  box.innerHTML = one ? clipInspector(one) : sel.size > 1 ? multiInspector() : projectInspector();
   box.scrollTop = st;
   if (focusId) document.getElementById(focusId)?.focus();
 }
@@ -874,7 +882,7 @@ inspEl.addEventListener('click', async e => {
     const [, preset] = EFX_PRESETS[+efxp.dataset.efxp];
     for (const x of selectedClips()) {
       if (!['video', 'image', 'adjust'].includes(x.kind)) continue;
-      const keep = Object.fromEntries(['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt'].map(k => [k, x.props.efx?.[k] ?? EFX0[k]]));
+      const keep = Object.fromEntries(LUM_KEYS.map(k => [k, x.props.efx?.[k] ?? EFX0[k]]));
       x.props.efx = { ...EFX0, ...keep, ...preset };
     }
     commit(); renderInspector(); drawFrame();
@@ -922,10 +930,10 @@ inspEl.addEventListener('click', async e => {
   else if (act === 'mute' && c) { delete c.kf.volume; c.props.volume = 0; commit(); renderInspector(); }
   else if (act === 'resetfx' && c) { c.props.fx = { ...FX0 }; c.props.lut = null; commit(); renderInspector(); drawFrame(); }
   else if (act === 'resetlum' && c) {
-    for (const k of ['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt']) c.props.efx[k] = EFX0[k];
+    for (const k of LUM_KEYS) c.props.efx[k] = EFX0[k];
     commit(); renderInspector(); drawFrame();
   } else if (act === 'resetefx' && c) {
-    const keep = Object.fromEntries(['exposure', 'highlights', 'shadows', 'vibrance', 'tintS', 'tintSAmt', 'tintH', 'tintHAmt'].map(k => [k, c.props.efx?.[k] ?? EFX0[k]]));
+    const keep = Object.fromEntries(LUM_KEYS.map(k => [k, c.props.efx?.[k] ?? EFX0[k]]));
     c.props.efx = { ...EFX0, ...keep };
     c.props.shake = { ...SHAKE0 };
     commit(); renderInspector(); drawFrame();

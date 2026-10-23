@@ -30,6 +30,7 @@ async function showHome(tab = 'list', view = 'projects') {
   if (!Store.ready) { toast('Zapis projektów nie działa w tym trybie przeglądarki (np. okno prywatne)'); return; }
   if (playing) pause();
   await closeRecorder(); // mikrofon nie zostaje włączony pod menu, a nagranie trafia do tego projektu
+  closeScopes(); // wskaźniki nie czytają podglądu w tle pod menu
   await flushSave();
   closeMenu();
   homeTab = Store.mode === 'cloud' ? tab : 'list';

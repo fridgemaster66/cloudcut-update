@@ -269,21 +269,44 @@ function speedRamp(c, kind, n = 12) {
   const speeds = [...Array(n)].map((_, i) => clamp(base * R.f((i + 0.5) / n), SPEED_MIN, SPEED_MAX));
   const total = speeds.reduce((a, s) => a + chunk / s, 0);
   const delta = total - c.dur, oldEnd = clipEnd(c);
-  // reszta tych ścieżek przesuwa się o zmianę długości (jak „rozsuń” w Premiere); inne ścieżki zostają
-  const tracks = new Set(members.map(x => x.trackId));
+  // reszta tych ścieżek przesuwa się o zmianę długości (jak „rozsuń” w Premiere) — razem z połączonymi klipami
+  // na innych ścieżkach i tym, co leży za nimi, żeby żadna para obraz+dźwięk się nie rozjechała
   const ids = new Set(members.map(x => x.id));
-  for (const y of state.clips) if (tracks.has(y.trackId) && !ids.has(y.id) && y.start >= oldEnd - EPS) y.start += delta;
+  const from = new Map(members.map(x => [x.trackId, oldEnd - EPS])); // ścieżka → od kiedy przesuwamy
+  const moving = new Set();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const y of state.clips) {
+      if (moving.has(y) || ids.has(y.id) || !(from.has(y.trackId) && y.start >= from.get(y.trackId))) continue;
+      moving.add(y); grew = true;
+      for (const g of groupMembers(y)) {
+        if (ids.has(g.id) || moving.has(g)) continue;
+        if (!from.has(g.trackId) || g.start - EPS < from.get(g.trackId)) { from.set(g.trackId, g.start - EPS); grew = true; }
+      }
+    }
+  }
+  if (moving.size && [...moving].some(y => isLocked(y))) { toast('Rampa przesunęłaby klipy na zablokowanej ścieżce — odblokuj ją'); return; }
+  for (const y of moving) y.start += delta;
+  // skrócenie zostawia przerwę, jeśli przesunięcie w lewo nałożyłoby klipy na wcześniejsze
+  const movedIds = new Set([...moving].map(y => y.id));
+  if (delta < 0 && [...moving].some(y => y.start < -EPS || overlaps(y.trackId, y.start, clipEnd(y), new Set([...movedIds, ...ids])))) for (const y of moving) y.start -= delta;
   const groups = [...Array(n)].map(() => (members.length > 1 ? uid('g') : null));
   const out = [];
+  const oldSeg = chunk / base; // długość odcinka przed rampą (w czasie osi)
   for (const x of members) {
     let t = x.start;
+    let rest = structuredClone(x.kf || {});
     state.clips = state.clips.filter(y => y.id !== x.id);
     for (let i = 0; i < n; i++) {
       const p = structuredClone(x);
       p.id = uid('c');
       p.start = t; p.dur = chunk / speeds[i]; p.speed = sign * speeds[i];
       p.in = x.in + sign * chunk * i;
-      p.kf = {};
+      // animacja (klatki kluczowe) zostaje: każdy odcinek dostaje swój kawałek, rozciągnięty do nowej długości
+      let seg = rest;
+      if (i < n - 1) [seg, rest] = splitKf(rest, oldSeg);
+      p.kf = seg;
+      scaleKf(p, base / speeds[i]);
       p.group = groups[i];
       if (i > 0) { p.props.fadeIn = 0; if (isTransition(p.props.inType)) p.props.inType = 'fade'; }
       if (i < n - 1) p.props.fadeOut = 0;

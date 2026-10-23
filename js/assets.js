@@ -360,7 +360,9 @@ async function saveClipAsAsset(c) {
 async function saveLookAsAsset(c) {
   const name = await ask('Nazwa zestawu kolorów', 'Mój look', { ok: 'Zapisz' });
   if (!name?.trim()) return;
-  await Store.putAsset({ id: uid('a'), kind: 'look', name: name.trim(), data: { fx: c.props.fx, lut: c.props.lut }, fav: false });
+  // korekcja Lumetri (efx bez efektów stylizacji) jest częścią koloru — zapisuje się razem z filtrami i LUT
+  const lum = c.props.efx ? Object.fromEntries(LUM_KEYS.map(k => [k, c.props.efx[k] ?? EFX0[k]])) : null;
+  await Store.putAsset({ id: uid('a'), kind: 'look', name: name.trim(), data: { fx: c.props.fx, lut: c.props.lut, lum }, fav: false });
   await loadUserAssets();
   toast('Zapisano zestaw kolorów — kliknij go w „Moje”, żeby nałożyć na zaznaczone klipy');
 }
@@ -388,7 +390,11 @@ async function useMyAsset(a, t, trackId) {
   if (a.kind === 'look') {
     const targets = selectedClips().filter(c => c.props.fx);
     if (!targets.length) { toast('Zaznacz klipy, na które nałożyć ten zestaw kolorów'); return; }
-    for (const c of targets) { c.props.fx = { ...FX0, ...a.data.fx }; if (a.data.lut) c.props.lut = { ...a.data.lut }; }
+    for (const c of targets) {
+      c.props.fx = { ...FX0, ...a.data.fx };
+      if (a.data.lut) c.props.lut = { ...a.data.lut };
+      if (a.data.lum && ['video', 'image', 'adjust'].includes(c.kind)) c.props.efx = { ...EFX0, ...c.props.efx, ...a.data.lum };
+    }
     commit(); renderAll();
     return;
   }
