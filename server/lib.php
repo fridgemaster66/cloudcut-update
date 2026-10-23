@@ -108,6 +108,8 @@ function db(): PDO {
     )');
     // migracje starszych baz
     if (!hasColumn($pdo, 'github_sync', 'login')) $pdo->exec('ALTER TABLE github_sync ADD COLUMN login TEXT');
+    // sposób logowania do GitHuba: 'token' (wklejony) albo 'git' (konto zalogowane w gicie na tym komputerze)
+    if (!hasColumn($pdo, 'github_sync', 'auth')) $pdo->exec('ALTER TABLE github_sync ADD COLUMN auth TEXT');
     if (!hasColumn($pdo, 'projects', 'deleted')) $pdo->exec('ALTER TABLE projects ADD COLUMN deleted INTEGER');
     if (!hasColumn($pdo, 'users', 'pass_initial')) $pdo->exec('ALTER TABLE users ADD COLUMN pass_initial INTEGER NOT NULL DEFAULT 0');
     $pdo->exec('CREATE INDEX IF NOT EXISTS projects_user ON projects(user_id)');

@@ -557,13 +557,19 @@ try {
                     $set['branch'] = $br;
                 }
                 if (!empty($b['clearToken'])) {
-                    $set += ['token' => null, 'token_hint' => null, 'login' => null];
+                    $set += ['token' => null, 'token_hint' => null, 'login' => null, 'auth' => null];
                 } elseif (trim((string) ($b['token'] ?? '')) !== '') {
                     $tok = trim((string) $b['token']);
                     if (!preg_match('/^[A-Za-z0-9_]{20,255}$/', $tok)) fail(422, 'To nie wygląda na token GitHub — skopiuj go jeszcze raz (zaczyna się od ghp_ albo github_pat_).');
-                    $set += ['token' => sealToken($tok), 'token_hint' => substr($tok, 0, (int) strrpos($tok, '_') + 1) . '…' . substr($tok, -4), 'login' => null];
+                    $set += ['token' => sealToken($tok), 'token_hint' => substr($tok, 0, (int) strrpos($tok, '_') + 1) . '…' . substr($tok, -4), 'login' => null, 'auth' => 'token'];
                 }
                 ghSaveConfig($uid, $set);
+                out(200, ghPublic($uid));
+            }
+            if ($sub === 'use-git' && $method === 'POST') {
+                // „Użyj konta GitHub z tego komputera”: logowanie gita (Git Credential Manager) zamiast wklejanego tokenu
+                if (ghGitToken() === null) fail(424, 'Git na tym komputerze nie jest zalogowany do GitHuba. Wklej token albo zaloguj gita (np. przy pierwszym „git push”).');
+                ghSaveConfig($uid, ['auth' => 'git', 'token' => null, 'token_hint' => null, 'login' => null]);
                 out(200, ghPublic($uid));
             }
             if ($sub === 'check' && $method === 'POST') out(200, ghCheck($uid));
@@ -578,7 +584,7 @@ try {
                 $ids = array_column($q->fetchAll(), 'id');
                 if (!$ids) fail(404, 'Nie ma takich projektów');
                 $cfg = ghConfig($uid);
-                if (!$cfg['token'] || !parseRepo((string) $cfg['repo'])) fail(428, 'Najpierw podaj w Ustawieniach token GitHub i link do repozytorium');
+                if (!ghHasAuth($cfg) || !parseRepo((string) $cfg['repo'])) fail(428, 'Najpierw połącz GitHuba w Ustawieniach (konto z tego komputera albo token) i podaj link do repozytorium');
                 if (($st = ghStatus($uid)) && $st['state'] === 'running') fail(409, 'Trwa inne zadanie z GitHubem — poczekaj, aż się skończy');
                 ghStartWorker($uid, ['type' => 'push', 'projects' => $ids]);
                 out(200, ['status' => ghStatus($uid)]);

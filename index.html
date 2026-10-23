@@ -404,6 +404,11 @@
             <div class="field"><label for="ghBranch">Gałąź <span class="opt">(opcjonalnie)</span></label>
               <input type="text" id="ghBranch" spellcheck="false" autocomplete="off" placeholder="main"></div>
           </div>
+          <div class="gh-git">
+            <button type="button" class="btn small primary" id="ghUseGit"><svg class="gh-mark" aria-hidden="true"><use href="#ghMark"/></svg> <span id="ghUseGitLabel">Użyj konta GitHub z tego komputera</span></button>
+            <span class="field-hint">Najprościej: jeśli ten komputer jest już zalogowany do GitHuba (przez gita), CloudCut skorzysta z tego logowania — bez kopiowania tokenu.</span>
+          </div>
+          <p class="gh-or">albo wklej token:</p>
           <div class="field"><label for="ghToken">Klucz dostępu GitHub (token)</label>
             <div class="pass-wrap"><input id="ghToken" type="password" spellcheck="false" autocomplete="off" placeholder="ghp_…">
               <button type="button" class="icon-btn" id="ghTokenShow" aria-label="Pokaż token" aria-pressed="false" title="Pokaż token">

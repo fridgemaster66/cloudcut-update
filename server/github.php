@@ -60,14 +60,50 @@ function ghValidBranch(string $b): bool {
 function ghConfig(int $uid): array {
     $q = db()->prepare('SELECT * FROM github_sync WHERE user_id = ?');
     $q->execute([$uid]);
-    return $q->fetch() ?: ['user_id' => $uid, 'repo' => '', 'branch' => '', 'token' => null, 'token_hint' => null, 'login' => null, 'last_push' => null, 'last_url' => null];
+    return $q->fetch() ?: ['user_id' => $uid, 'repo' => '', 'branch' => '', 'token' => null, 'token_hint' => null, 'login' => null, 'last_push' => null, 'last_url' => null, 'auth' => null];
 }
 function ghSaveConfig(int $uid, array $set): void {
     $c = array_merge(ghConfig($uid), $set);
-    db()->prepare('INSERT INTO github_sync (user_id, repo, branch, token, token_hint, login, last_push, last_url) VALUES (?,?,?,?,?,?,?,?)
+    db()->prepare('INSERT INTO github_sync (user_id, repo, branch, token, token_hint, login, last_push, last_url, auth) VALUES (?,?,?,?,?,?,?,?,?)
         ON CONFLICT(user_id) DO UPDATE SET repo=excluded.repo, branch=excluded.branch, token=excluded.token, token_hint=excluded.token_hint,
-        login=excluded.login, last_push=excluded.last_push, last_url=excluded.last_url')
-        ->execute([$uid, $c['repo'], $c['branch'], $c['token'], $c['token_hint'], $c['login'], $c['last_push'], $c['last_url']]);
+        login=excluded.login, last_push=excluded.last_push, last_url=excluded.last_url, auth=excluded.auth')
+        ->execute([$uid, $c['repo'], $c['branch'], $c['token'], $c['token_hint'], $c['login'], $c['last_push'], $c['last_url'], $c['auth'] ?? null]);
+}
+function ghUsesGit(array $cfg): bool { return ($cfg['auth'] ?? null) === 'git'; }
+function ghHasAuth(array $cfg): bool { return ghUsesGit($cfg) || (bool) $cfg['token']; }
+/*
+ * Logowanie „z tego komputera”: klucz, który Git Credential Manager zapisał w menedżerze haseł Windows,
+ * gdy użytkownik zalogował gita do GitHuba przez przeglądarkę. Pobierany na czas zapytań, nigdzie nie zapisywany.
+ * CLOUDCUT_GIT pozwala wskazać inny program git (testy).
+ */
+function ghGitPath(): ?string {
+    $env = getenv('CLOUDCUT_GIT');
+    if ($env) return $env;
+    foreach ([getenv('ProgramFiles') . '\\Git\\cmd\\git.exe', getenv('ProgramFiles(x86)') . '\\Git\\cmd\\git.exe', getenv('LOCALAPPDATA') . '\\Programs\\Git\\cmd\\git.exe'] as $p) {
+        if ($p && is_file($p)) return $p;
+    }
+    return PHP_OS_FAMILY === 'Windows' ? 'git.exe' : 'git';
+}
+function ghGitToken(): ?string {
+    static $tok = false;
+    if ($tok !== false) return $tok;
+    $env = getenv();
+    $env['GCM_INTERACTIVE'] = 'never';   // bez okienek: jeśli git nie jest zalogowany, po prostu nie ma klucza
+    $env['GIT_TERMINAL_PROMPT'] = '0';
+    $p = @proc_open([ghGitPath(), 'credential', 'fill'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
+    if (!is_resource($p)) return $tok = null;
+    fwrite($pipes[0], "protocol=https\nhost=github.com\n\n");
+    fclose($pipes[0]);
+    $out = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($p);
+    return $tok = preg_match('/^password=(\S+)\s*$/m', $out, $m) ? $m[1] : null;
+}
+/* Klucz do zapytań albo null (publiczne repozytoria da się czytać bez niego) */
+function ghTokenMaybe(array $cfg): ?string {
+    if (ghUsesGit($cfg)) return ghGitToken();
+    return $cfg['token'] ? openToken($cfg['token']) : null;
 }
 /* To, co widzi okno programu — bez tokenu */
 function ghPublic(int $uid): array {
@@ -79,9 +115,10 @@ function ghPublic(int $uid): array {
         'repoName' => $repo && $owner ? "$owner/$repo[1]" : ($repo ? $repo[1] : null),
         'repoUrl' => $repo && $owner ? ghWeb() . "/$owner/$repo[1]" : null,
         'branch' => (string) $c['branch'],
-        'hasToken' => (bool) $c['token'],
-        'tokenHint' => $c['token_hint'],
-        'tokenReadable' => !$c['token'] || openToken($c['token']) !== null,
+        'hasToken' => ghHasAuth($c),
+        'authMode' => ghUsesGit($c) ? 'git' : ($c['token'] ? 'token' : null),
+        'tokenHint' => ghUsesGit($c) ? 'konto Git z tego komputera' : $c['token_hint'],
+        'tokenReadable' => ghUsesGit($c) || !$c['token'] || openToken($c['token']) !== null,
         'login' => $c['login'],
         'lastPush' => $c['last_push'] ? (int) $c['last_push'] : null,
         'lastUrl' => $c['last_url'],
@@ -99,6 +136,9 @@ function ghMarkPushed(int $uid, array $projects): void {
     file_put_contents(DATA_DIR . "/github/$uid.pushed.json", json_encode($all), LOCK_EX);
 }
 function ghToken(array $cfg): string {
+    if (ghUsesGit($cfg)) {
+        return ghGitToken() ?? throw new GhError('Git na tym komputerze nie jest już zalogowany do GitHuba. Kliknij w Ustawieniach „Użyj konta GitHub z tego komputera” albo wklej token.');
+    }
     if (!$cfg['token']) throw new GhError('Nie ma jeszcze tokenu GitHub — wklej go w Ustawieniach.');
     $t = openToken($cfg['token']);
     if ($t === null) throw new GhError('Zapisanego tokenu nie da się odczytać na tym komputerze — wklej go ponownie w Ustawieniach.');
@@ -597,7 +637,7 @@ function ghNewId(string $prefix): string { return $prefix . bin2hex(random_bytes
 /* Odczyt repozytorium kopii bez zmieniania go (puste repozytorium = brak projektów) */
 function ghRemoteRead(int $uid): array {
     $cfg = ghConfig($uid);
-    $token = $cfg['token'] ? openToken($cfg['token']) : null;
+    $token = ghTokenMaybe($cfg);
     $repo = parseRepo((string) $cfg['repo']);
     if (!$repo) throw new GhError('Najpierw połącz CloudCut z GitHubem w Ustawieniach (link do repozytorium i token).');
     $owner = $repo[0] ?? ($token ? ghLogin($cfg, $token, $uid) : null);
@@ -689,7 +729,7 @@ function ghThumbFile(int $uid, string $folder): ?array {
         $file = "$dir/$sha.$x";
         if (!is_file($file)) {
             $cfg = ghConfig($uid);
-            $r = ['base' => ghApi() . "/repos/{$c['owner']}/{$c['name']}", 'token' => $cfg['token'] ? openToken($cfg['token']) : null];
+            $r = ['base' => ghApi() . "/repos/{$c['owner']}/{$c['name']}", 'token' => ghTokenMaybe($cfg)];
             ghBlob($r, $sha, $file);
         }
         return [$file, $type];

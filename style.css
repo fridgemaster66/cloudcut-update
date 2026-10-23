@@ -962,6 +962,9 @@ body.dragging-files .dropzone { display: grid; }
 .field .opt { color: var(--muted); font-weight: 400; }
 .field-hint a { color: var(--accent); }
 .gh-account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12.5px; }
+.gh-git { display: grid; justify-items: start; gap: 6px; margin: 2px 0 8px; }
+.gh-git .gh-mark { width: 15px; height: 15px; }
+.gh-or { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
 .gh-account img { border-radius: 50%; }
 .gh-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 a.btn { text-decoration: none; color: inherit; }

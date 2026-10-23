@@ -93,7 +93,7 @@ function updPublic(): array {
 /* Token z sekcji GitHub (jeśli jest) — potrzebny tylko do prywatnego repozytorium */
 function updToken(int $uid): ?string {
     $g = ghConfig($uid);
-    return $g['token'] ? openToken($g['token']) : null;
+    return ghTokenMaybe($g);
 }
 
 /* Najnowszy commit i lista plików programu w repozytorium: ścieżka względem programu => suma gita */

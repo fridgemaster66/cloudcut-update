@@ -209,7 +209,9 @@ async function ghFillSettings() {
   $('#ghRepo').value = g.repo || 'cloudcat-project001';
   $('#ghBranch').value = g.branch || '';
   $('#ghToken').value = '';
-  $('#ghToken').placeholder = g.hasToken ? `zapisany (${g.tokenHint || '…'}) — wklej nowy, żeby zmienić` : 'ghp_…';
+  $('#ghToken').placeholder = g.authMode === 'git' ? 'nie trzeba — używane jest konto z tego komputera'
+    : g.hasToken ? `zapisany (${g.tokenHint || '…'}) — wklej nowy, żeby zmienić` : 'ghp_…';
+  $('#ghUseGitLabel').textContent = g.authMode === 'git' ? '✓ Używane konto GitHub z tego komputera' : 'Użyj konta GitHub z tego komputera';
   $('#ghForget').hidden = !g.hasToken;
   ghRenderRepoLink(g.repoUrl);
   $('#ghAccount').hidden = !g.login;
@@ -267,6 +269,21 @@ $('#ghForm').addEventListener('submit', async e => {
     await ghSaveSettings();
     if (ghInfo.hasToken) await ghCheck();
     else ghResult('Zapisano. Wklej jeszcze token GitHub, żeby połączyć konto.', 'warn');
+  } catch (ex) { ghResult(esc(ex.message), 'err'); }
+  btn.disabled = false;
+  ghRenderLine();
+});
+$('#ghUseGit').addEventListener('click', async () => {
+  const btn = $('#ghUseGit');
+  btn.disabled = true;
+  ghResult('Sprawdzanie logowania GitHub na tym komputerze…');
+  try {
+    // link do repozytorium z formularza zapisujemy razem (bez tokenu)
+    await api('PUT', 'github', { repo: $('#ghRepo').value.trim(), branch: $('#ghBranch').value.trim() });
+    ghInfo = await api('POST', 'github/use-git');
+    $('#ghToken').value = '';
+    await ghFillSettings();
+    await ghCheck();
   } catch (ex) { ghResult(esc(ex.message), 'err'); }
   btn.disabled = false;
   ghRenderLine();
