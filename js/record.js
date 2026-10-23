@@ -64,8 +64,9 @@ function buildRecorder() {
 
 /* Mikrofon włącza się od razu po otwarciu panelu — fala i poziom pokazują, czy dźwięk dochodzi, jeszcze przed nagraniem */
 async function recStartInput() {
-  if (rec.starting) return;
+  if (rec.starting) { rec.again = true; return; } // zmiana mikrofonu w trakcie włączania — wykona się zaraz po nim
   rec.starting = true;
+  rec.again = false;
   recStopInput();
   const p = recPrefs();
   const lvl = $('#recLevel');
@@ -80,7 +81,7 @@ async function recStartInput() {
       delete audio.deviceId; // zapamiętanego mikrofonu nie ma — bierzemy domyślny
       stream = await navigator.mediaDevices.getUserMedia({ audio });
     }
-    if (!rec.dlg.open) { stream.getTracks().forEach(t => t.stop()); return; }
+    if (!rec.dlg.open || rec.again) { stream.getTracks().forEach(t => t.stop()); return; }
     rec.stream = stream;
     const ac = ensureAudio();
     if (ac.state === 'suspended') ac.resume().catch(() => {});
@@ -102,6 +103,7 @@ async function recStartInput() {
     await recFillDevices().catch(() => {});
   } finally {
     rec.starting = false;
+    if (rec.again && rec.dlg.open) recStartInput();
   }
 }
 function recErrorText(err) {
@@ -205,7 +207,8 @@ function recStart() {
   rec.t0 = playhead;
   r.ondataavailable = e => { if (e.data.size) rec.chunks.push(e.data); };
   r.onstart = () => { rec.startedAt = performance.now(); };
-  r.onstop = () => recFinish(r.mimeType || mime || 'audio/webm');
+  // rec.done: koniec zapisu nagrania na osi czasu (czeka na nie zamknięcie panelu i zmiana projektu)
+  rec.done = new Promise(res => { r.onstop = () => recFinish(r.mimeType || mime || 'audio/webm').catch(err => toast('Nie udało się zapisać nagrania: ' + err.message, 5000)).finally(res); });
   r.start(1000);
   rec.startedAt = performance.now();
   rec.wePlay = $('#recPlay').checked && !playing;
@@ -219,9 +222,10 @@ function recStart() {
   document.body.classList.add('is-recording');
 }
 function recStop() {
-  if (!recRecording()) return;
+  if (!recRecording()) return rec.done || Promise.resolve();
   rec.recorder.stop();
   if (rec.wePlay && playing) pause();
+  return rec.done;
 }
 async function recFinish(type) {
   // dźwięk zaczął się nagrywać chwilę po starcie odtwarzania — przesuwamy klip o tę różnicę, żeby głos był w punkt
@@ -247,9 +251,12 @@ async function recFinish(type) {
   toast(`Nagranie (${recClock(m.duration)}) jest na ścieżce ${tr.name}`);
   recUpdateWhere();
 }
-function closeRecorder() {
-  if (recRecording()) recStop(); // nagranie nie przepada — zapisze się po zatrzymaniu
+/* Zamknięcie panelu: trwające nagranie nie przepada — zatrzymuje się i trafia na oś, zanim panel zniknie */
+async function closeRecorder() {
+  if (!rec.dlg?.open && !recRecording()) return;
+  const saving = recRecording() ? recStop() : rec.done;
   recStopInput();
   rec.dlg?.close();
   $('#btnRecord')?.focus();
+  await saving;
 }

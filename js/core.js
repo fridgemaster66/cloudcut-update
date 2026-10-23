@@ -403,7 +403,7 @@ function projectThumb() {
 function clearSession() {
   if (playing) pause();
   for (const id of [...players.keys()]) dropPlayer(id);
-  for (const m of media.values()) URL.revokeObjectURL(m.url);
+  for (const m of media.values()) { URL.revokeObjectURL(m.url); forgetAudio(m.id); }
   media.clear();
   sel.clear();
   playhead = 0;
@@ -411,6 +411,7 @@ function clearSession() {
 }
 
 async function newProject(opts = {}) {
+  await closeRecorder();
   await flushSave();
   clearSession();
   state = newState();
@@ -427,6 +428,7 @@ async function loadProject(id) {
   const got = await Store.getProject(id).catch(() => null);
   if (!got) return false;
   const { rec, media: metas } = got;
+  await closeRecorder(); // trwające nagranie trafia jeszcze do projektu, w którym je zaczęto
   await flushSave();
   clearSession();
   project = { id: rec.id, name: rec.name };
@@ -654,6 +656,7 @@ function removeMedia(id) {
   state.clips = state.clips.filter(c => c.mediaId !== id);
   delete state.mediaFolder[id];
   media.delete(id);
+  forgetAudio(id);
   if (srcMediaId === id) closeSource();
   gcPlayers();
   URL.revokeObjectURL(m.url);

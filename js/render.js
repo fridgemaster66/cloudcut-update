@@ -234,6 +234,11 @@ function reversedBuffer(mediaId) {
   reversedBufferAsync(mediaId).catch(() => revBufs.set(mediaId, null));
   return null;
 }
+/* Zwolnienie zdekodowanego dźwięku pliku (usunięty plik albo zamknięty projekt) — to kopie całego pliku w pamięci */
+function forgetAudio(mediaId) {
+  revBufs.delete(mediaId);
+  if (typeof decoded !== 'undefined') decoded.delete(mediaId);
+}
 function stopRev(p) {
   if (!p.rev) return;
   try { p.rev.node.stop(); } catch { /* już zatrzymany */ }
@@ -284,7 +289,7 @@ function syncMedia() {
       const sp = c.speed * (live ? rate : 1);
       // przeglądarka odtwarza tylko do przodu i w zakresie 1/16–16× — wstecz i szybciej obraz idzie skokami (przewijanie)
       const native = sp >= 0.0625 && sp <= 16;
-      const seekMode = live && !native;
+      const seekMode = (live && !native) || scrubbing; // przewijanie co klatkę: także przy przeciąganiu głowicy
       if (seekMode && !p.seekMode && !el.seeking) snapPlayer(p);
       if (!seekMode) p.snapOk = false;
       p.seekMode = seekMode;

@@ -257,6 +257,7 @@ function splitAV() {
 function setSpeed(c, s, base = null) {
   s = (s < 0 ? -1 : 1) * clamp(Math.abs(s) || 1, SPEED_MIN, SPEED_MAX);
   const members = groupMembers(c);
+  const plans = [];
   for (const x of members) {
     if (!isAV(x)) continue;
     const o = base?.get(x.id) || x;
@@ -267,9 +268,16 @@ function setSpeed(c, s, base = null) {
     if (next) nd = Math.min(nd, next.start - o.start);
     const m = media.get(x.mediaId);
     if (m) nd = Math.min(nd, s > 0 ? (m.duration - nin) / s : nin / -s);
+    plans.push({ x, o, nin, nd });
+  }
+  // obraz i dźwięk połączonej pary (ten sam początek i długość) dostają wspólną, najkrótszą długość — inaczej by się rozjechały
+  const pairEnd = p => Math.round(p.o.start * 1000) + ':' + Math.round(p.o.dur * 1000);
+  const shortest = new Map();
+  for (const p of plans) shortest.set(pairEnd(p), Math.min(shortest.get(pairEnd(p)) ?? Infinity, p.nd));
+  for (const { x, o, nin } of plans) {
     x.kf = structuredClone(o.kf || {});
     scaleKf(x, Math.abs(o.speed / s));
-    x.dur = Math.max(frame(), nd);
+    x.dur = Math.max(frame(), shortest.get(pairEnd({ o })));
     x.in = nin;
     x.speed = s;
   }

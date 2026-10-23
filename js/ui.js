@@ -633,7 +633,10 @@ function clipInspector(c) {
   if (c.kind === 'audio' || c.kind === 'video') {
     let body;
     if (c.kind === 'video' && P.detached) {
-      body = `<p class="hint">Dźwięk tego filmu jest na osobnym, połączonym klipie audio — zaznacz go, żeby zmienić głośność.</p>${ctlCheck(c, 'detached', 'Dźwięk na osobnym klipie (wycisza ten)')}`;
+      // po „Rozdziel” para nie jest połączona — dźwięk filmu gra z osobnego klipu albo jest po prostu wyciszony
+      const linked = groupMembers(c).some(x => x.kind === 'audio');
+      body = `<p class="hint">${linked ? 'Dźwięk tego filmu jest na osobnym, połączonym klipie audio — zaznacz go, żeby zmienić głośność.'
+        : 'Dźwięk tego filmu jest tu wyciszony — po „Rozdziel” gra z osobnego klipu na ścieżce audio. Odznacz pole, żeby film znowu grał własny dźwięk.'}</p>${ctlCheck(c, 'detached', linked ? 'Dźwięk na osobnym klipie (wycisza ten)' : 'Wycisz dźwięk tego klipu')}`;
     } else {
       body = `${ctlRange(c, 'volume', 'Głośność', 0, 3, 0.01, 'pct', true)}
         <div class="chips">${m?.peak ? '<button class="chip" data-act="normalize">Normalizuj</button>' : ''}<button class="chip" data-act="mute">Wycisz</button></div>`;
