@@ -27,7 +27,7 @@
     <button id="btnRedo" class="icon-btn" title="Ponów (Ctrl+Shift+Z)" aria-label="Ponów">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
     </button>
-    <button id="btnHelp" class="icon-btn" title="Skróty klawiszowe (?)" aria-label="Skróty klawiszowe">
+    <button id="btnHelp" class="icon-btn" title="Skróty klawiszowe (? / F1)" aria-label="Skróty klawiszowe">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
     </button>
     <button id="btnSettings" class="icon-btn" title="Ustawienia i układ" aria-label="Ustawienia i układ">
@@ -342,6 +342,18 @@
   <div class="dlg-actions"><button type="button" class="btn" id="helpClose">Zamknij</button></div>
 </dialog>
 
+<div class="layout-peek" id="layoutPeek" role="status" hidden>
+  <span>Podgląd układu — krawędzie paneli możesz też przeciągać myszą</span>
+  <button type="button" class="btn primary small" id="layoutPeekBack">Wróć do ustawień</button>
+</div>
+
+<div class="upd-banner" id="updBanner" role="status" hidden>
+  <svg class="upd-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+  <span id="updBannerText">Dostępna aktualizacja CloudCut</span>
+  <button type="button" class="btn primary small" id="updBannerShow">Pokaż</button>
+  <button type="button" class="btn small" id="updBannerLater">Przypomnij następnym razem</button>
+</div>
+
 <dialog id="updDlg" class="dlg" aria-labelledby="updDlgTitle">
   <h2 id="updDlgTitle">Dostępna aktualizacja CloudCut</h2>
   <p class="upd-msg" id="updDlgMsg"></p>
@@ -420,7 +432,12 @@
             <div class="field"><label for="updBranch">Gałąź <span class="opt">(opcjonalnie)</span></label>
               <input type="text" id="updBranch" spellcheck="false" autocomplete="off" placeholder="main"></div>
           </div>
-          <label class="check"><input type="checkbox" id="updAuto" checked> Sprawdzaj przy każdym uruchomieniu programu</label>
+          <div class="field upd-mode"><label for="updMode">Sprawdzaj</label>
+            <select id="updMode">
+              <option value="watch">Przy każdej zmianie w repozytorium (co 3 minuty)</option>
+              <option value="start">Przy każdym uruchomieniu programu</option>
+              <option value="manual">Tylko ręcznie — przyciskiem „Sprawdź teraz”</option>
+            </select></div>
           <div class="gh-actions">
             <button type="submit" class="btn primary small">Zapisz</button>
             <button type="button" class="btn small" id="updCheckNow">Sprawdź teraz</button>
@@ -432,13 +449,19 @@
         <p class="hint" id="updState"></p>
       </form>
     </section>
+    <section aria-labelledby="avTitle">
+      <h3 class="set-h" id="avTitle">Kolor avatara</h3>
+      <div class="av-grid" id="avatarGrid" role="radiogroup" aria-labelledby="avTitle"></div>
+    </section>
     <section>
       <h3 class="set-h">Układ okna</h3>
       <div class="layout-grid" id="layoutGrid" role="radiogroup" aria-label="Szablon układu"></div>
     </section>
     <section class="set-cols">
       <div>
-        <h3 class="set-h">Wielkość sekcji</h3>
+        <div class="set-h-row"><h3 class="set-h">Wielkość sekcji</h3>
+          <button type="button" class="btn small" id="setPreviewLayout" title="Pokaż edytor z tymi wymiarami">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Podgląd</button></div>
         <div id="sizeCtrls"></div>
         <p class="hint">Krawędzie paneli możesz też przeciągać myszą bezpośrednio w oknie programu.</p>
       </div>

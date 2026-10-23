@@ -396,7 +396,7 @@ function projectInspector() {
     sec('tips', 'Jak zacząć', `<ul class="keys">
       <li>Import plików <kbd>${keyLabel('import')}</kbd></li><li>Przeciągnij plik na oś</li><li>Dwuklik pliku → monitor źródła</li>
       <li>Przetnij <kbd>${keyLabel('split')}</kbd></li><li>Żyletka <kbd>${keyLabel('toolBlade')}</kbd></li><li>Odtwarzanie <kbd>${keyLabel('play')}</kbd></li>
-      <li>Wszystkie skróty i ich zmiana <kbd>${keyLabel('help')}</kbd></li></ul>`);
+      <li>Wszystkie skróty i ich zmiana <kbd>${keysLabel('help')}</kbd></li></ul>`);
 }
 
 function multiInspector() {

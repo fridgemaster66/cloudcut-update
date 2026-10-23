@@ -122,6 +122,8 @@ function ghReport(array $p, bool $force = false): void {
  * $o: headers (zastępują domyślne), auth: bearer|basic|none, upload: ścieżka pliku do PUT, progress: fn(int $wysłane)
  */
 function ghCall(string $method, string $url, ?string $token, $body = null, array $o = []): array {
+    // w żądaniach z okna programu (api.php) nie czekamy: serwer PHP jest jednowątkowy i stanąłby cały program
+    $noWait = !empty($GLOBALS['ghNoWait']);
     for ($try = 0; ; $try++) {
         $hdr = [];
         $headers = $o['headers'] ?? ['Accept: application/vnd.github+json', 'X-GitHub-Api-Version: 2022-11-28'];
@@ -161,11 +163,12 @@ function ghCall(string $method, string $url, ?string $token, $body = null, array
         $err = curl_error($c);
         if ($fh) fclose($fh);
         if ($raw === false) {
-            if ($try < 3) { sleep(3 + 4 * $try); continue; }
+            if ($try < 3 && !$noWait) { sleep(3 + 4 * $try); continue; }
             throw new GhError('Brak połączenia z GitHubem (' . $err . '). Sprawdź internet i spróbuj ponownie.');
         }
         $limited = ($code === 403 || $code === 429)
             && (isset($hdr['retry-after']) || ($hdr['x-ratelimit-remaining'] ?? '') === '0' || stripos((string) $raw, 'rate limit') !== false);
+        if ($limited && $noWait) throw new GhError('GitHub chwilowo ogranicza liczbę zapytań — spróbuj ponownie za kilka minut.');
         if ($limited && $try < 6) {
             $wait = isset($hdr['retry-after']) ? (int) $hdr['retry-after'] : (isset($hdr['x-ratelimit-reset']) ? (int) $hdr['x-ratelimit-reset'] - time() : 60);
             $wait = max(5, min($wait, 900));
@@ -173,7 +176,7 @@ function ghCall(string $method, string $url, ?string $token, $body = null, array
             sleep($wait);
             continue;
         }
-        if ($code >= 500 && $try < 3) { sleep(3 + 5 * $try); continue; }
+        if ($code >= 500 && $try < 3 && !$noWait) { sleep(3 + 5 * $try); continue; }
         return ['code' => $code, 'json' => json_decode((string) $raw, true), 'headers' => $hdr, 'raw' => (string) $raw];
     }
 }

@@ -259,7 +259,7 @@ const COMMANDS = [
   { id: 'focusTimeline', g: 'view', label: 'Przejdź do osi czasu', short: 'Oś czasu', keys: ['shift+3'], run: () => focusPanel(3) },
   { id: 'focusProgram', g: 'view', label: 'Przejdź do podglądu', short: 'Program', keys: ['shift+4'], run: () => focusPanel(4) },
   { id: 'focusInspector', g: 'view', label: 'Przejdź do właściwości', short: 'Właściwości', keys: ['shift+5'], run: () => focusPanel(5) },
-  { id: 'help', g: 'view', label: 'Skróty klawiszowe (to okno)', short: 'Skróty', keys: ['shift+/', 'f1'], run: () => openKeys() },
+  { id: 'help', g: 'view', label: 'Skróty klawiszowe (to okno)', short: 'Skróty', keys: ['shift+/', '/', 'f1'], run: () => openKeys() }, // „?” to Shift + klawisz „/” — sam klawisz też otwiera
 
   // Pliki
   { id: 'import', g: 'file', label: 'Importuj pliki', short: 'Import', keys: ['ctrl+i'], run: () => $('#fileInput').click() },
@@ -355,7 +355,8 @@ function comboLabel(combo) {
   }).join('+').replace('Shift+/', '?');
 }
 const keyLabel = id => comboLabel(keysOf(id)[0]);
-const keysLabel = id => keysOf(id).map(comboLabel).join(' / ');
+// „/” obok „Shift+/” to ten sam klawisz — w podpisie wystarczy „?”
+const keysLabel = id => { const k = keysOf(id); return k.filter(c => !(c === '/' && k.includes('shift+/'))).map(comboLabel).join(' / '); };
 
 /* =========================================================
    Obsługa klawiatury

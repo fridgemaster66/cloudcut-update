@@ -535,6 +535,8 @@ try {
         }
     }
 
+    if ($r === 'github' || $r === 'update') $GLOBALS['ghNoWait'] = true;
+
     if ($r === 'github') {
         require_once __DIR__ . '/github.php';
         $uid = userId();
@@ -606,11 +608,17 @@ try {
                     if ($br !== '' && !ghValidBranch($br)) fail(422, 'Nieprawidłowa nazwa gałęzi');
                     $set['branch'] = $br;
                 }
-                if (array_key_exists('auto', $b)) $set['auto'] = (bool) $b['auto'];
-                updSave($set);
+                if (array_key_exists('mode', $b)) {
+                    if (!in_array($b['mode'], UPD_MODES, true)) fail(422, 'Nieznany sposób sprawdzania');
+                    $set['mode'] = $b['mode'];
+                }
+                $before = updRepoKey(updConfig());
+                $c = updSave($set);
+                if (updRepoKey($c) !== $before) updSave(['lastResult' => null, 'etag' => null, 'defaultBranch' => null]);
                 out(200, updPublic());
             }
             if ($sub === 'check' && $method === 'POST') out(200, updCheck($uid));
+            if ($sub === 'poll' && $method === 'POST') out(200, updPoll($uid));
             if ($sub === 'apply' && $method === 'POST') out(200, updApply($uid));
             if ($sub === 'rollback' && $method === 'POST') out(200, updRollback());
         } catch (GhError $e) {

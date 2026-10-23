@@ -5,7 +5,9 @@
 let updInfo = null;     // ustawienia z serwera: repozytorium, gałąź, zainstalowana wersja, kopia poprzedniej
 let updFound = null;    // ostatnio wykryta aktualizacja
 let updChecked = false; // sprawdzenie przy starcie robimy raz na uruchomienie programu
+let updTimer = null;    // tryb „przy każdej zmianie”: odpytywanie repozytorium
 const UPD_LATER = 'cloudcut-upd-later'; // sessionStorage: „przypomnij następnym razem” do zamknięcia programu
+const UPD_EVERY = 180_000;              // co ile sprawdzać w trybie „przy każdej zmianie”
 
 async function updLoad() {
   if (Store.mode !== 'cloud') { updInfo = null; return null; }
@@ -16,7 +18,7 @@ const updDate = s => new Date(s).toLocaleString('pl-PL', { dateStyle: 'medium', 
 
 /* ---------- Ustawienia ---------- */
 let updSnapshot = '';
-const updFormValue = () => JSON.stringify([$('#updRepo').value.trim(), $('#updBranch').value.trim(), $('#updAuto').checked]);
+const updFormValue = () => JSON.stringify([$('#updRepo').value.trim(), $('#updBranch').value.trim(), $('#updMode').value]);
 function updResult(html, kind = '') {
   const el = $('#updResult');
   el.className = 'gh-result' + (kind ? ' ' + kind : '');
@@ -31,7 +33,7 @@ async function updFill() {
   const u = updInfo || {};
   $('#updRepo').value = u.repo || '';
   $('#updBranch').value = u.branch || '';
-  $('#updAuto').checked = u.auto ?? true;
+  $('#updMode').value = u.mode || 'watch';
   updSnapshot = updFormValue();
   updRenderState();
 }
@@ -46,9 +48,10 @@ function updRenderState() {
   $('#updState').textContent = parts.join(' ');
 }
 async function updSaveForm() {
-  updInfo = await api('PUT', 'update', { repo: $('#updRepo').value.trim(), branch: $('#updBranch').value.trim(), auto: $('#updAuto').checked });
+  updInfo = await api('PUT', 'update', { repo: $('#updRepo').value.trim(), branch: $('#updBranch').value.trim(), mode: $('#updMode').value });
   updSnapshot = updFormValue();
   updRenderState();
+  updWatch();
 }
 function updAutoSave() {
   if (Store.mode !== 'cloud' || updFormValue() === updSnapshot) return;
@@ -74,12 +77,22 @@ $('#updCheckNow').addEventListener('click', async () => {
     if (updFound.available) {
       updResult(`Jest aktualizacja: ${plural(updFound.files.length, 'zmieniony plik', 'zmienione pliki', 'zmienionych plików')}.`, 'warn');
       updShow(updFound);
+    } else if (updFound.incomplete) {
+      updResult(updIncompleteMsg(updFound), 'warn');
     } else {
       updResult(`✓ Masz najnowszą wersję z ${esc(updFound.repo)}.`, 'ok');
     }
   } catch (ex) { updResult(esc(ex.message), 'err'); }
   btn.disabled = false;
 });
+/* Repozytorium bez pełnego programu — instalacja z niego mieszałaby stary i nowy kod */
+function updIncompleteMsg(c) {
+  const ex = c.missing[0] || '';
+  return c.flat
+    ? `W repozytorium <strong>${esc(c.repo)}</strong> pliki leżą bez folderów (np. ${esc(ex.split('/').pop())} zamiast ${esc(ex)}) — tak robi GitHub, gdy wgrywa się pojedyncze pliki. `
+      + 'Przeciągnij na stronę GitHuba („Add file → Upload files”) <strong>całą zawartość</strong> rozpakowanego folderu CloudCut, razem z folderami js, server i vendor. Do tego czasu program nie proponuje aktualizacji.'
+    : `Repozytorium <strong>${esc(c.repo)}</strong> jest niepełne — brakuje ${plFiles(c.missingCount)} programu (np. ${esc(c.missing.slice(0, 3).join(', '))}). Wgraj cały folder CloudCut. Do tego czasu program nie proponuje aktualizacji.`;
+}
 $('#updShowFound').addEventListener('click', () => { if (updFound?.available) updShow(updFound); });
 $('#updRollback').addEventListener('click', async () => {
   if (!confirm('Przywrócić pliki programu sprzed ostatniej aktualizacji? Projekty i konto zostają bez zmian.')) return;
@@ -92,19 +105,46 @@ $('#updRollback').addEventListener('click', async () => {
 });
 new MutationObserver(() => { if ($('#settingsDlg').open) updFill(); }).observe($('#settingsDlg'), { attributes: true, attributeFilter: ['open'] });
 
-/* ---------- Sprawdzenie przy starcie i komunikat ---------- */
+/* ---------- Sprawdzanie przy starcie, przy każdej zmianie i komunikat ---------- */
 async function updAutoCheck() {
   if (updChecked || Store.mode !== 'cloud') return;
   updChecked = true;
   await updLoad();
-  if (!updInfo?.repo || !updInfo.auto) return;
-  try { updFound = await api('POST', 'update/check'); } catch { return; } // brak internetu itp. — nie przeszkadzamy
-  if (!updFound.available) return;
+  updWatch();
+  if (!updInfo?.repo || updInfo.mode === 'manual') return;
+  try { updFound = await api('POST', 'update/check'); } catch { return; } // brak internetu, puste repozytorium — nie przeszkadzamy
+  updOffer();
+}
+/* Tryb „przy każdej zmianie”: co UPD_EVERY lekkie zapytanie o ostatni commit (serwer porównuje pliki tylko po zmianie) */
+function updWatch() {
+  clearTimeout(updTimer);
+  updTimer = null;
+  if (Store.mode !== 'cloud' || !updInfo?.repo || updInfo.mode !== 'watch') return;
+  updTimer = setTimeout(async function tick() {
+    if (Store.mode !== 'cloud' || updInfo?.mode !== 'watch') return;
+    let delay = UPD_EVERY;
+    try {
+      updFound = await api('POST', 'update/poll');
+      updOffer();
+    } catch { delay = UPD_EVERY * 3; } // błąd lub puste repozytorium — rzadziej, żeby nie zużywać limitu GitHuba
+    updTimer = setTimeout(tick, delay);
+  }, UPD_EVERY);
+}
+/* Pokazuje znalezioną aktualizację, chyba że użytkownik odłożył właśnie tę wersję („Przypomnij następnym razem”) */
+function updOffer() {
+  if (!updFound?.available || $('#updDlg').open) return;
   let later = null;
   try { later = sessionStorage.getItem(UPD_LATER); } catch { /* bez pamięci sesji */ }
   if (later === updFound.sha) return;
-  updShow(updFound);
+  // w menu głównym okno; w edytorze dymek w rogu, żeby nie przerywać montażu
+  if (isHomeOpen() || !project.id) updShow(updFound);
+  else {
+    $('#updBannerText').textContent = `Dostępna aktualizacja CloudCut: ${(updFound.message || '').split('\n')[0] || plFiles(updFound.files.length)}`;
+    $('#updBanner').hidden = false;
+  }
 }
+$('#updBannerShow').addEventListener('click', () => { $('#updBanner').hidden = true; if (updFound?.available) updShow(updFound); });
+$('#updBannerLater').addEventListener('click', () => { $('#updBanner').hidden = true; updLater(); });
 function updShow(c) {
   const dlg = $('#updDlg');
   const [title, ...rest] = (c.message || 'Zmiany w programie').split('\n');
@@ -122,7 +162,7 @@ function updShow(c) {
 }
 function updLater() {
   try { sessionStorage.setItem(UPD_LATER, updFound?.sha || ''); } catch { /* bez pamięci sesji */ }
-  $('#updDlg').close();
+  if ($('#updDlg').open) $('#updDlg').close();
   toast('Przypomnę o aktualizacji przy następnym uruchomieniu programu', 3500);
 }
 $('#updLater').addEventListener('click', updLater);
