@@ -602,6 +602,13 @@ try {
                 ghStartWorker($uid, ['type' => 'import', 'folder' => $folder]);
                 out(200, ['status' => ghStatus($uid)]);
             }
+            if ($sub === 'delete' && $method === 'POST') {
+                $folder = (string) (body()['folder'] ?? '');
+                if (!preg_match('#^projekty/[A-Za-z0-9._-]+$#', $folder)) fail(422, 'Nieprawidłowy projekt');
+                if (!ghHasAuth(ghConfig($uid))) fail(428, 'Usuwanie z GitHuba wymaga połączenia w Ustawieniach (konto z tego komputera albo token)');
+                if (($st = ghStatus($uid)) && $st['state'] === 'running') fail(409, 'Trwa inne zadanie z GitHubem — poczekaj, aż się skończy');
+                out(200, ghDeleteRemoteProject($uid, $folder));
+            }
         } catch (GhError $e) {
             fail(502, $e->getMessage());
         }

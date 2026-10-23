@@ -115,6 +115,8 @@ function ghpRender() {
         <button type="button" class="btn small${p.local ? '' : ' primary'}" data-ghp-import="${esc(p.folder)}"${busy ? ' disabled' : ''}
           title="${p.local ? 'Ten projekt jest już na komputerze — pobierze się jako osobna kopia' : 'Pobierz projekt z plikami do CloudCut'}">${p.local ? 'Pobierz jako kopię' : 'Pobierz do CloudCut'}</button>
         <a class="btn small" href="${esc(p.url)}" target="_blank" rel="noopener" title="Otwórz folder projektu na GitHubie">GitHub ↗</a>
+        <button type="button" class="btn small danger gh-del" data-ghp-delete="${esc(p.folder)}" data-name="${esc(p.name)}"${busy ? ' disabled' : ''}
+          aria-label="Usuń „${esc(p.name)}” z GitHuba" title="Usuń z GitHuba — projekt na komputerze zostaje"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
       </div></div>`).join('')
     : '<div class="home-empty"><strong>Na GitHubie nie ma jeszcze projektów</strong>Zaznacz projekty w zakładce Projekty i kliknij czarny przycisk „Zapisz na GitHub”.</div>';
   ghpRenderLine();
@@ -131,6 +133,8 @@ function ghpRenderLine() {
 }
 $('#ghpRefresh').addEventListener('click', () => ghpLoad());
 $('#ghpList').addEventListener('click', async e => {
+  const del = e.target.closest('[data-ghp-delete]');
+  if (del) { ghpDelete(del); return; }
   const b = e.target.closest('[data-ghp-import]');
   if (!b) return;
   if (ghInfo?.status?.state === 'running') { toast('Poczekaj, aż skończy się bieżące zadanie z GitHubem'); return; }
@@ -144,6 +148,26 @@ $('#ghpList').addEventListener('click', async e => {
     ghStartPolling();
   } catch (ex) { toast(ex.message, 5000); b.disabled = false; }
 });
+/* Usunięcie projektu z repozytorium kopii — jeden commit; projekt na komputerze zostaje */
+async function ghpDelete(b) {
+  if (ghInfo?.status?.state === 'running') { toast('Poczekaj, aż skończy się bieżące zadanie z GitHubem'); return; }
+  const p = ghpData?.projects.find(x => x.folder === b.dataset.ghpDelete);
+  const where = p?.local ? 'Projekt na tym komputerze zostaje bez zmian.' : 'Tego projektu nie ma na tym komputerze — po usunięciu zostanie tylko w historii repozytorium.';
+  if (!confirm(`Usunąć „${b.dataset.name}” z GitHuba?\n\n${where}`)) return;
+  b.disabled = true;
+  b.closest('.gh-card')?.classList.add('removing');
+  toast(`Usuwanie „${b.dataset.name}” z GitHuba…`, 20000);
+  try {
+    const r = await api('POST', 'github/delete', { folder: b.dataset.ghpDelete });
+    toast(`Usunięto „${r.name}” z GitHuba`);
+    await ghpLoad();
+    ghLoad();
+  } catch (ex) {
+    toast(ex.message, 5000);
+    b.disabled = false;
+    b.closest('.gh-card')?.classList.remove('removing');
+  }
+}
 function ghRenderLine() {
   const el = $('#ghLine'), s = ghInfo?.status;
   el.className = 'gh-line';

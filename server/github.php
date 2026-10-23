@@ -790,3 +790,62 @@ function ghImportProject(int $uid, string $folder): array {
         ->execute([$pid, $uid, $name, $data, json_encode($mediaIds), (float) ($pj['duration'] ?? 0), $thumb, (int) round(microtime(true) * 1000)]);
     return ['id' => $pid, 'name' => $name, 'files' => count($mediaIds), 'bytes' => $doneBytes, 'missing' => $missing, 'copy' => $taken];
 }
+
+/*
+ * Usunięcie projektu z repozytorium kopii (zakładka Projekty (GitHub)). Jeden commit: znika folder projektu,
+ * a spis cloudcut.json i README dostają nową listę. Projekt na komputerze zostaje; na GitHubie zostaje tylko w historii.
+ */
+function ghDeleteRemoteProject(int $uid, string $folder): array {
+    if (!preg_match('#^projekty/[A-Za-z0-9._-]+$#', $folder)) throw new GhError('Nieprawidłowy projekt.');
+    $cfg = ghConfig($uid);
+    $token = ghToken($cfg);
+    [$owner, $name] = ghResolveRepo($cfg, $token, $uid);
+    $base = ghApi() . "/repos/$owner/$name";
+    $info = ghCall('GET', $base, $token);
+    if ($info['code'] !== 200) ghFail($info, "repozytorium $owner/$name");
+    $branch = $cfg['branch'] ?: (string) ($info['json']['default_branch'] ?? 'main');
+    for ($try = 0; ; $try++) {
+        $ref = ghCall('GET', "$base/git/ref/heads/$branch", $token);
+        if ($ref['code'] !== 200) ghFail($ref, "gałąź $branch");
+        $head = $ref['json']['object']['sha'];
+        $c = ghCall('GET', "$base/git/commits/$head", $token);
+        if ($c['code'] !== 200) ghFail($c, 'ostatni commit');
+        $baseTree = $c['json']['tree']['sha'];
+        $t = ghCall('GET', "$base/git/trees/$baseTree?recursive=1", $token);
+        if ($t['code'] !== 200) ghFail($t, 'zawartość repozytorium');
+        $remote = [];
+        foreach ($t['json']['tree'] ?? [] as $e) if (($e['type'] ?? '') === 'blob') $remote[$e['path']] = $e['sha'];
+        $gone = array_values(array_filter(array_keys($remote), fn($p) => str_starts_with($p, "$folder/")));
+        if (!$gone) throw new GhError('Tego projektu nie ma już na GitHubie — odśwież listę.');
+        // spis i README bez tego projektu
+        $index = ['app' => 'CloudCut', 'format' => 1, 'savedAt' => time(), 'projects' => []];
+        if (isset($remote['cloudcut.json'])) {
+            $old = ghCall('GET', "$base/git/blobs/{$remote['cloudcut.json']}", $token);
+            $prev = $old['code'] === 200 ? json_decode((string) base64_decode((string) ($old['json']['content'] ?? '')), true) : null;
+            if (is_array($prev['projects'] ?? null)) $index['projects'] = $prev['projects'];
+        }
+        $pname = substr($folder, 9);
+        $pid = preg_match('#-([a-z0-9]{4,48})$#i', $folder, $im) ? $im[1] : null;
+        foreach ($index['projects'] as $id => $p) {
+            if (is_array($p) && ($p['folder'] ?? '') === $folder) { $pname = (string) ($p['name'] ?? $pname); $pid = (string) $id; unset($index['projects'][$id]); }
+        }
+        $tree = array_map(fn($p) => ['path' => $p, 'mode' => '100644', 'type' => 'blob', 'sha' => null], $gone);
+        $tree[] = ['path' => 'cloudcut.json', 'mode' => '100644', 'type' => 'blob',
+            'content' => json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n"];
+        $tree[] = ['path' => 'README.md', 'mode' => '100644', 'type' => 'blob', 'content' => ghReadme($index)];
+        $nt = ghCall('POST', "$base/git/trees", $token, ['base_tree' => $baseTree, 'tree' => $tree]);
+        if ($nt['code'] !== 201) ghFail($nt, 'drzewo plików');
+        $cm = ghCall('POST', "$base/git/commits", $token, ['message' => "CloudCut: usunięto projekt „{$pname}”", 'tree' => $nt['json']['sha'], 'parents' => [$head]]);
+        if ($cm['code'] !== 201) ghFail($cm, 'commit');
+        $up = ghCall('PATCH', "$base/git/refs/heads/$branch", $token, ['sha' => $cm['json']['sha'], 'force' => false]);
+        if ($up['code'] === 422 && $try < 1) continue; // ktoś zapisał w międzyczasie — jeszcze raz od nowego stanu
+        if ($up['code'] !== 200) ghFail($up, 'przesunięcie gałęzi');
+        // znaczek „na GitHubie” przy projekcie na komputerze znika
+        $pushed = ghPushed($uid);
+        if ($pid !== null && isset($pushed[$pid])) {
+            unset($pushed[$pid]);
+            file_put_contents(DATA_DIR . "/github/$uid.pushed.json", json_encode($pushed ?: new stdClass()), LOCK_EX);
+        }
+        return ['name' => $pname, 'files' => count($gone), 'url' => ghWeb() . "/$owner/$name/commit/{$cm['json']['sha']}"];
+    }
+}

@@ -900,6 +900,9 @@ body.dragging-files .dropzone { display: grid; }
 .gh-card-top { cursor: default; }
 .gh-card .pc-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .gh-card .pc-acts { padding-top: 0; }
+.gh-card .gh-del { margin-left: auto; display: inline-grid; place-items: center; padding: 4px 7px; }
+.gh-del svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.gh-card.removing { opacity: .55; pointer-events: none; }
 .pc-badge.newer { background: #9a6b00; }
 /* Biblioteka */
 .lib-drop {
