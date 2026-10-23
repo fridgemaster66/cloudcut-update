@@ -305,6 +305,8 @@ async function logout() {
   Store.mode = 'local';
   Store.user = null;
   userAssets = [];
+  libFolders = [];
+  libFolder = null;
   renderAssets();
   state = newState();
   project = { id: null, name: 'Nowy projekt' };

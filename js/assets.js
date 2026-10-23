@@ -326,8 +326,12 @@ $('#lutInput').addEventListener('change', async e => {
 
 /* ---------------- Moje assety (baza na koncie) ---------------- */
 let userAssets = [];
+let libFolders = []; // foldery Biblioteki (kind „folder”) — trzymane osobno, żeby nie były „assetem” w edytorze
 async function loadUserAssets() {
-  try { userAssets = (await Store.listAssets()) || []; } catch { userAssets = []; }
+  let all = [];
+  try { all = (await Store.listAssets()) || []; } catch { all = []; }
+  libFolders = all.filter(a => a.kind === 'folder');
+  userAssets = all.filter(a => a.kind !== 'folder');
   for (const k of [...lutCache.keys()]) if (k.startsWith('u:')) lutCache.delete(k); // zaimportowane LUT-y wczytają się na nowo
   registerUserFonts(); // czcionki z Biblioteki → wybór czcionek we wszystkich projektach
   renderAssets();

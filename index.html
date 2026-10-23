@@ -595,15 +595,21 @@
         <h1>Biblioteka</h1>
         <p class="home-sub">Twoje rzeczy do wszystkich projektów: czcionki, zdjęcia, filmy, muzyka i LUT-y (.cube). W edytorze są w zakładce Assety → Moje, a czcionki w wyborze czcionek („Moje czcionki”).</p>
       </div>
-      <button type="button" class="btn primary small" id="libAdd">+ Dodaj pliki</button>
+      <div class="lib-head-btns">
+        <button type="button" class="btn small" id="libNewFolder">+ Nowy folder</button>
+        <button type="button" class="btn small" id="libAddDir" title="Wybierz folder na dysku — trafi do Biblioteki razem z podfolderami">Dodaj folder z dysku</button>
+        <button type="button" class="btn primary small" id="libAdd">+ Dodaj pliki</button>
+      </div>
       <input type="file" id="libInput" multiple accept=".ttf,.otf,.woff,.woff2,.cube,image/*,video/*,audio/*" hidden>
+      <input type="file" id="libDirInput" webkitdirectory multiple hidden>
     </div>
-    <button type="button" class="lib-drop" id="libDrop">Przeciągnij tu pliki albo kliknij: czcionki (.ttf, .otf, .woff, .woff2), zdjęcia, filmy, muzykę i LUT-y (.cube)</button>
+    <button type="button" class="lib-drop" id="libDrop">Przeciągnij tu pliki albo całe foldery, albo kliknij: czcionki (.ttf, .otf, .woff, .woff2), zdjęcia, filmy, muzykę i LUT-y (.cube)</button>
     <div class="home-list-head">
       <div class="seg lib-cats" id="libCats" role="group" aria-label="Rodzaj"></div>
       <div class="home-tools"><label class="sr-only" for="libSearch">Szukaj w bibliotece</label><input type="search" id="libSearch" placeholder="Szukaj w bibliotece…"></div>
     </div>
     <p class="gh-line" id="libLine" role="status" hidden></p>
+    <nav class="lib-path" id="libPath" aria-label="Folder w Bibliotece"></nav>
     <div class="lib-grid" id="libList" aria-live="polite"></div>
   </main>
 
