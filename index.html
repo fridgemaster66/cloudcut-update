@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CloudCut — studio montażu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&family=Montserrat:wght@500;700;800&family=Oswald:wght@500;700&family=Permanent+Marker&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button type="button" class="brand brand-btn" id="brandHome" title="Menu główne — wszystkie projekty"><span class="logo" aria-hidden="true"></span>CloudCut</button>
+  <input id="projName" class="proj-name" value="Nowy projekt" aria-label="Nazwa projektu" spellcheck="false">
+  <span id="saveState" class="save-state" aria-live="polite"></span>
+  <div class="top-actions">
+    <button id="btnProjects" class="btn ghost" title="Menu główne — wszystkie projekty">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      Menu główne
+    </button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button id="btnUndo" class="icon-btn" title="Cofnij (Ctrl+Z)" aria-label="Cofnij">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+    </button>
+    <button id="btnRedo" class="icon-btn" title="Ponów (Ctrl+Shift+Z)" aria-label="Ponów">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+    </button>
+    <button id="btnHelp" class="icon-btn" title="Skróty klawiszowe (?)" aria-label="Skróty klawiszowe">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+    </button>
+    <button id="btnSettings" class="icon-btn" title="Ustawienia i układ" aria-label="Ustawienia i układ">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <button id="btnAccount" class="account-btn" aria-haspopup="menu" title="Konto">
+      <span class="avatar" id="accAvatar" aria-hidden="true">?</span><span class="acc-mail" id="accMail">Bez konta</span>
+    </button>
+    <button id="btnExport" class="btn primary" title="Eksportuj film (Ctrl+E)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      Eksportuj
+    </button>
+  </div>
+</header>
+
+<main class="workspace">
+  <!-- ========== Biblioteka ========== -->
+  <section class="panel bin" aria-label="Biblioteka">
+    <div class="tabs" role="tablist" aria-label="Biblioteka">
+      <button role="tab" id="tab-media" aria-selected="true" aria-controls="panel-media" data-tab="media">Media</button>
+      <button role="tab" id="tab-titles" aria-selected="false" aria-controls="panel-titles" data-tab="titles" tabindex="-1">Napisy</button>
+      <button role="tab" id="tab-trans" aria-selected="false" aria-controls="panel-trans" data-tab="trans" tabindex="-1">Przejścia</button>
+      <button role="tab" id="tab-assets" aria-selected="false" aria-controls="panel-assets" data-tab="assets" tabindex="-1">Assety</button>
+    </div>
+    <div class="tabpanel" id="panel-media" role="tabpanel" aria-labelledby="tab-media" data-panel="media">
+      <div class="bin-tools">
+        <input type="search" id="binSearch" placeholder="Szukaj we wszystkich folderach…" aria-label="Szukaj w mediach">
+        <button id="btnImport" class="btn small primary" title="Importuj pliki (Ctrl+I)">+ Importuj</button>
+      </div>
+      <div class="bin-tools bin-tools2">
+        <button class="icon-btn sm" id="binNewFolder" title="Nowy folder" aria-label="Nowy folder">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+        </button>
+        <label class="sr-only" for="binFilter">Rodzaj plików</label>
+        <select id="binFilter" class="mini-select" title="Pokaż tylko">
+          <option value="all">Wszystkie</option><option value="video">Wideo</option><option value="audio">Audio</option><option value="image">Obrazy</option><option value="unused">Nieużywane</option>
+        </select>
+        <label class="sr-only" for="binSort">Sortowanie</label>
+        <select id="binSort" class="mini-select" title="Sortuj">
+          <option value="added">Kolejność dodania</option><option value="name">Nazwa A–Z</option><option value="dur">Długość</option><option value="kind">Rodzaj</option>
+        </select>
+        <button class="icon-btn sm" id="binView" title="Widok listy / siatki" aria-label="Przełącz widok listy" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        </button>
+      </div>
+      <nav class="crumbs" id="binCrumbs" aria-label="Ścieżka folderów"></nav>
+      <div id="binList" class="bin-list"></div>
+    </div>
+    <div class="tabpanel" id="panel-titles" role="tabpanel" aria-labelledby="tab-titles" data-panel="titles" hidden>
+      <p class="panel-hint">Kliknij, aby dodać w miejscu głowicy, albo przeciągnij na oś czasu.</p>
+      <div id="titleList" class="preset-list"></div>
+    </div>
+    <div class="tabpanel" id="panel-trans" role="tabpanel" aria-labelledby="tab-trans" data-panel="trans" hidden>
+      <div class="trans-tools">
+        <div class="field"><div class="lbl"><label for="transDur">Długość przejścia</label><output id="transDurOut">0,8 s</output></div>
+          <input type="range" id="transDur" min="0.2" max="3" step="0.1" value="0.8"></div>
+        <div class="trans-all">
+          <label class="sr-only" for="transAllType">Przejście dla wszystkich cięć</label>
+          <select id="transAllType" class="mini-select"></select>
+          <button class="btn small" id="transAll" title="Nałóż wybrane przejście na każde cięcie w projekcie">Na wszystkie cięcia</button>
+          <button class="btn small" id="transClear" title="Usuń przejścia z zaznaczonych (albo wszystkich) klipów">Usuń</button>
+        </div>
+      </div>
+      <div id="transList" class="preset-scroll"></div>
+    </div>
+    <div class="tabpanel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" data-panel="assets" hidden>
+      <div class="bin-tools">
+        <input type="search" id="assetSearch" placeholder="Szukaj assetów…" aria-label="Szukaj assetów">
+      </div>
+      <div class="asset-cats" id="assetCats" role="group" aria-label="Kategorie assetów"></div>
+      <div id="assetList" class="preset-scroll"></div>
+    </div>
+    <input type="file" id="fileInput" multiple accept="video/*,audio/*,image/*,.srt,.vtt" hidden>
+    <input type="file" id="lutInput" accept=".cube" hidden>
+  </section>
+
+  <!-- ========== Podgląd ========== -->
+  <section class="panel viewer" aria-label="Podgląd">
+    <div class="viewer-head">
+      <div class="seg" role="group" aria-label="Monitor">
+        <button data-mon="program" aria-pressed="true">Program</button>
+        <button data-mon="source" id="monSourceBtn" aria-pressed="false">Źródło</button>
+      </div>
+      <div class="viewer-tools">
+        <label class="sr-only" for="previewQ">Jakość podglądu</label>
+        <select id="previewQ" class="mini-select" title="Jakość podglądu (nie wpływa na eksport)">
+          <option value="1">Pełna jakość</option>
+          <option value="0.5">Połowa</option>
+          <option value="0.25">Ćwierć</option>
+        </select>
+        <button class="icon-btn" id="btnGuides" aria-pressed="false" title="Siatka i strefy bezpieczne (G)" aria-label="Siatka i strefy bezpieczne">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+        </button>
+        <button class="icon-btn" id="btnSnapshot" title="Zapisz bieżącą klatkę jako PNG" aria-label="Zapisz klatkę jako PNG">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        </button>
+        <button class="icon-btn" id="btnFull" title="Pełny ekran (F11 w podglądzie)" aria-label="Podgląd na pełnym ekranie">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage" id="stage" tabindex="-1" aria-label="Podgląd programu">
+        <div class="screen-box" id="screenBox">
+          <canvas id="screen" width="1920" height="1080" aria-label="Podgląd montażu"></canvas>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+        </div>
+        <div class="source-box" id="sourceBox" hidden>
+          <video id="srcVideo" playsinline preload="auto"></video>
+          <div class="src-empty" id="srcEmpty">Kliknij dwukrotnie plik w bibliotece, aby obejrzeć go tutaj, zaznaczyć fragment (I / O) i wstawić na oś czasu.</div>
+        </div>
+      </div>
+      <canvas class="meter" id="meterCv" aria-hidden="true" title="Poziom dźwięku L/P"></canvas>
+    </div>
+    <div class="src-bar" id="srcBar" hidden>
+      <button class="icon-btn" id="srcPlay" aria-label="Odtwórz źródło" title="Odtwórz / pauza (spacja)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8z" fill="currentColor"/></svg>
+      </button>
+      <div class="src-track" id="srcTrack" role="slider" tabindex="0" aria-label="Pozycja w pliku źródłowym" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="src-range" id="srcRange"></div>
+        <div class="src-head" id="srcHead"></div>
+      </div>
+      <span class="tc small" id="srcTc">00:00:00</span>
+      <button class="btn small" id="srcIn" title="Początek fragmentu (I)">I</button>
+      <button class="btn small" id="srcOut" title="Koniec fragmentu (O)">O</button>
+      <button class="btn small" id="srcInsert" title="Wstaw w miejscu głowicy i rozsuń resztę (,)">Wstaw</button>
+      <button class="btn small primary" id="srcOverwrite" title="Nadpisz w miejscu głowicy (.)">Nadpisz</button>
+    </div>
+    <div class="transport">
+      <div class="tc-wrap"><span class="tc" id="tcNow" aria-label="Bieżący czas">00:00:00</span><span class="rate" id="rateBadge"></span></div>
+      <div class="transport-btns">
+        <button class="icon-btn" id="btnPrevEdit" title="Poprzednie cięcie (↑)" aria-label="Poprzednie cięcie">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="m18 5-9 7 9 7z"/></svg>
+        </button>
+        <button class="icon-btn" id="btnPrev" title="Klatka wstecz (←)" aria-label="Klatka wstecz">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+        </button>
+        <button class="icon-btn play" id="btnPlay" title="Odtwórz / pauza (spacja, J K L)" aria-label="Odtwórz">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="i-play"><path d="M7 4v16l13-8z"/></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="i-pause"><path d="M7 4h4v16H7zM14 4h4v16h-4z"/></svg>
+        </button>
+        <button class="icon-btn" id="btnNext" title="Klatka naprzód (→)" aria-label="Klatka naprzód">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+        </button>
+        <button class="icon-btn" id="btnNextEdit" title="Następne cięcie (↓)" aria-label="Następne cięcie">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="m6 5 9 7-9 7z"/></svg>
+        </button>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button class="icon-btn" id="btnLoop" aria-pressed="false" title="Zapętlanie zakresu I–O lub całości (Ctrl+L)" aria-label="Zapętlanie">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>
+        </button>
+        <button class="icon-btn txt" id="btnMarkIn" title="Początek zakresu (I)" aria-label="Ustaw początek zakresu">I</button>
+        <button class="icon-btn txt" id="btnMarkOut" title="Koniec zakresu (O)" aria-label="Ustaw koniec zakresu">O</button>
+      </div>
+      <div class="transport-right">
+        <label class="vol" title="Głośność odsłuchu (nie wpływa na eksport)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>
+          <span class="sr-only">Głośność odsłuchu</span>
+          <input type="range" id="monVol" min="0" max="1" step="0.01" value="1">
+        </label>
+        <span class="tc muted" id="tcEnd" aria-label="Długość projektu">00:00:00</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== Inspektor ========== -->
+  <aside class="panel inspector" aria-labelledby="inspTitle">
+    <div class="panel-head"><h2 id="inspTitle">Właściwości</h2></div>
+    <div id="inspector" class="insp-body" tabindex="-1"></div>
+  </aside>
+</main>
+
+<!-- ========== Oś czasu ========== -->
+<section class="timeline" aria-label="Oś czasu">
+  <div class="tl-toolbar">
+    <div class="seg" role="group" aria-label="Narzędzie">
+      <button id="toolSelect" data-tool="select" aria-pressed="true" title="Zaznaczanie (V)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 3 7 18 2.5-7.5L21 11z"/></svg><span>Zaznacz</span>
+      </button>
+      <button id="toolBlade" data-tool="blade" aria-pressed="false" title="Żyletka — tnie w miejscu kliknięcia (C)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg><span>Żyletka</span>
+      </button>
+      <button id="toolRipple" data-tool="ripple" aria-pressed="false" title="Przycinanie z zsunięciem — reszta ścieżki podąża za krawędzią (B)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M10 8l-4 4 4 4M14 12h6M17 9l3 3-3 3"/></svg><span>Ripple</span>
+      </button>
+      <button id="toolRoll" data-tool="roll" aria-pressed="false" title="Przesuwanie cięcia między dwoma klipami (R)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg><span>Roll</span>
+      </button>
+      <button id="toolSlip" data-tool="slip" aria-pressed="false" title="Poślizg — zmienia fragment pliku bez przesuwania klipu (Y)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M8 12h8M10 10l-2 2 2 2M14 10l2 2-2 2"/></svg><span>Slip</span>
+      </button>
+    </div>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button class="tool" id="btnSplit" title="Przetnij w miejscu głowicy (S / Ctrl+K)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M8 6l-4 6 4 6M16 6l4 6-4 6"/></svg>Przetnij
+    </button>
+    <button class="tool" id="btnDelete" title="Usuń zaznaczone (Delete)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Usuń
+    </button>
+    <button class="tool" id="btnRipple" title="Usuń i zsuń resztę (Shift+Delete)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12M12 8l4 4-4 4M20 5v14"/></svg>Usuń z zsunięciem
+    </button>
+    <button class="tool" id="btnLink" title="Połącz / rozłącz obraz z dźwiękiem (Ctrl+G)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>Połącz
+    </button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button class="tool" id="btnMarker" title="Dodaj znacznik (M)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v13l-6 5-6-5z"/></svg>Znacznik
+    </button>
+    <button class="tool" id="btnText" title="Dodaj napis (T)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Napis
+    </button>
+    <button class="tool" id="btnAddTrack" title="Dodaj ścieżkę" aria-haspopup="menu">+ Ścieżka</button>
+    <button class="tool" id="btnMixer" title="Mikser audio — głośność i panorama ścieżek">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v18M12 3v18M18 3v18"/><rect x="4" y="13" width="4" height="3" rx="1"/><rect x="10" y="7" width="4" height="3" rx="1"/><rect x="16" y="15" width="4" height="3" rx="1"/></svg>Mikser
+    </button>
+    <button class="tool pro" id="btnPro" aria-haspopup="menu" title="Narzędzia Pro: napisy AI, usuwanie ciszy, wykrywanie scen i rytmu, ściszanie muzyki pod głosem">✦ Pro</button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button class="tool" id="btnSnap" aria-pressed="true" title="Przyciąganie (N)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v7a6 6 0 0 0 12 0V3M6 3h4M14 3h4M6 7h4M14 7h4"/></svg>Przyciąganie
+    </button>
+    <div class="zoom">
+      <button class="tool" id="btnFit" title="Dopasuj oś do okna (\)">Dopasuj</button>
+      <label for="zoom" class="sr-only">Powiększenie osi czasu</label>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6"/></svg>
+      <input type="range" id="zoom" min="0" max="1000" value="500">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6M11 8v6"/></svg>
+    </div>
+  </div>
+  <div class="tl-body">
+    <div class="tl-heads" id="tlHeads"></div>
+    <div class="tl-scroll" id="tlScroll" tabindex="-1" aria-label="Ścieżki osi czasu">
+      <div class="tl-inner" id="tlInner">
+        <div class="tl-ruler" id="tlRuler"><canvas id="rulerCv"></canvas></div>
+        <div id="tlLanes"></div>
+        <div class="playhead" id="playhead" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="dropzone" id="dropzone" aria-hidden="true"><div>Upuść pliki, aby je zaimportować<small>wideo · audio · zdjęcia · napisy SRT/VTT</small></div></div>
+
+<!-- ========== Okna ========== -->
+<dialog id="exportDlg" class="dlg" aria-labelledby="expTitle">
+  <h2 id="expTitle">Eksport</h2>
+  <div class="field"><label for="expFmt">Format</label><select id="expFmt"></select></div>
+  <div class="row2">
+    <div class="field"><label for="expQuality" id="expQualityLbl">Jakość</label><select id="expQuality"></select></div>
+    <div class="field"><label for="expFps">Klatki na sekundę</label><select id="expFps"></select></div>
+  </div>
+  <div class="row2">
+    <div class="field" id="expRangeWrap"><label for="expRange">Zakres</label>
+      <select id="expRange"><option value="all">Cały projekt</option><option value="io">Zakres I–O</option></select></div>
+    <div class="field" id="expCompWrap"><label for="expComp">Kompresja</label>
+      <select id="expComp">
+        <option value="0">Najwyższa jakość (duży plik)</option>
+        <option value="1" selected>Wysoka</option>
+        <option value="2">Średnia</option>
+        <option value="3">Mały plik</option>
+      </select></div>
+  </div>
+  <p class="hint" id="expInfo"></p>
+  <div class="progress" id="expProgress" hidden><div class="bar" id="expBar"></div></div>
+  <p class="hint" id="expStatus" aria-live="polite"></p>
+  <div class="dlg-actions">
+    <button type="button" class="btn" id="expCancel">Anuluj</button>
+    <button type="button" class="btn primary" id="expStart">Eksportuj</button>
+  </div>
+</dialog>
+
+<dialog id="verDlg" class="dlg wide" aria-labelledby="verTitle">
+  <h2 id="verTitle">Historia wersji</h2>
+  <p class="hint">Wersje zapisują się same co 2 minuty pracy (ostatnie 40). Przywrócenie wczyta wybraną wersję jako bieżący stan — obecny też zostaje w historii.</p>
+  <div id="verList" class="proj-list"></div>
+  <div class="dlg-actions"><button type="button" class="btn" id="verClose">Zamknij</button></div>
+</dialog>
+
+<dialog id="passDlg" class="dlg" aria-labelledby="passTitle">
+  <form id="passForm" novalidate>
+    <h2 id="passTitle">Zmień hasło</h2>
+    <p class="hint" id="passInfo"></p>
+    <div class="field"><label for="passOld">Obecne hasło</label><input type="password" id="passOld" autocomplete="current-password" required></div>
+    <div class="field"><label for="passNew">Nowe hasło (min. 8 znaków)</label><input type="password" id="passNew" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label for="passNew2">Powtórz nowe hasło</label><input type="password" id="passNew2" autocomplete="new-password" minlength="8" required></div>
+    <p class="auth-err" id="passErr" role="alert"></p>
+    <div class="dlg-actions">
+      <button type="button" class="btn" id="passCancel">Anuluj</button>
+      <button type="submit" class="btn primary">Zapisz nowe hasło</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="helpDlg" class="dlg xwide" aria-labelledby="helpTitle">
+  <div class="dlg-head">
+    <h2 id="helpTitle">Skróty klawiszowe</h2>
+    <div class="dlg-head-tools">
+      <label class="sr-only" for="keySearch">Szukaj polecenia lub skrótu</label>
+      <input type="search" id="keySearch" placeholder="Szukaj polecenia lub klawisza…">
+      <button type="button" class="btn small" id="keyPrint" title="Ściągawka do wydruku">Drukuj ściągawkę</button>
+      <button type="button" class="btn small" id="keyReset">Przywróć domyślne</button>
+    </div>
+  </div>
+  <div class="keys-kb" id="keysKb">
+    <div class="kb-main" id="kbMain"></div>
+    <div class="kb-nav" id="kbNav"></div>
+  </div>
+  <div class="kb-foot"><span id="kbLayer"></span><span class="kb-legend" id="kbLegend"></span></div>
+  <p class="hint key-filter" id="keyFilterNote" hidden></p>
+  <div class="key-list" id="keyList"></div>
+  <p class="hint">Kliknij skrót, żeby go zmienić, „+”, żeby dodać kolejny, „×”, żeby usunąć. Twoje zmiany zapisują się w tej przeglądarce. Klawisze działają według ich miejsca na klawiaturze, więc polski układ nie przeszkadza.</p>
+  <div class="dlg-actions"><button type="button" class="btn" id="helpClose">Zamknij</button></div>
+</dialog>
+
+<dialog id="updDlg" class="dlg" aria-labelledby="updDlgTitle">
+  <h2 id="updDlgTitle">Dostępna aktualizacja CloudCut</h2>
+  <p class="upd-msg" id="updDlgMsg"></p>
+  <p class="hint" id="updDlgMeta"></p>
+  <ul class="upd-files" id="updDlgFiles"></ul>
+  <p class="hint" id="updDlgNote">Przed instalacją program odłoży kopię obecnych plików — w Ustawieniach możesz do niej wrócić. Projekty i konto zostają bez zmian.</p>
+  <div class="dlg-actions">
+    <button type="button" class="btn" id="updLater">Przypomnij następnym razem</button>
+    <button type="button" class="btn primary" id="updAccept">Zaakceptuj i zainstaluj</button>
+  </div>
+</dialog>
+
+<dialog id="askDlg" class="dlg" aria-labelledby="askTitle">
+  <form id="askForm" novalidate>
+    <h2 id="askTitle"></h2>
+    <p class="hint" id="askText" hidden></p>
+    <div class="field"><label for="askInput" id="askLabel"></label><input type="text" id="askInput" autocomplete="off" spellcheck="false"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn" id="askCancel">Anuluj</button>
+      <button type="submit" class="btn primary" id="askOk">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="ghMark" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+</svg>
+
+<div id="ctxMenu" class="ctx" role="menu" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<dialog id="settingsDlg" class="dlg xwide" aria-labelledby="setTitle">
+  <div class="dlg-head">
+    <h2 id="setTitle">Ustawienia</h2>
+    <button type="button" class="btn small" id="setReset">Przywróć domyślne</button>
+  </div>
+  <div class="set-body" id="setBody">
+    <section class="set-gh" id="setGithub" aria-labelledby="ghSetTitle">
+      <h3 class="set-h gh-h" id="ghSetTitle"><svg class="gh-mark" aria-hidden="true"><use href="#ghMark"/></svg> GitHub — kopia projektów w chmurze</h3>
+      <p class="hint" id="ghIntro">Projekty zapisują się na tym komputerze. Na GitHuba trafiają te, które zaznaczysz w menu głównym i klikniesz „Zapisz na GitHub”.</p>
+      <div class="gh-account" id="ghAccount" hidden></div>
+      <form id="ghForm" novalidate>
+        <fieldset id="ghFields">
+          <div class="gh-grid">
+            <div class="field"><label for="ghRepo">Link do repozytorium</label>
+              <input type="text" id="ghRepo" spellcheck="false" autocomplete="off" placeholder="https://github.com/twoja-nazwa/cloudcat-project001">
+              <span class="field-hint">Wystarczy sama nazwa, np. cloudcat-project001 — program dopisze Twoje konto. Jeśli repozytorium nie istnieje, założy je (prywatne).</span></div>
+            <div class="field"><label for="ghBranch">Gałąź <span class="opt">(opcjonalnie)</span></label>
+              <input type="text" id="ghBranch" spellcheck="false" autocomplete="off" placeholder="main"></div>
+          </div>
+          <div class="field"><label for="ghToken">Klucz dostępu GitHub (token)</label>
+            <div class="pass-wrap"><input id="ghToken" type="password" spellcheck="false" autocomplete="off" placeholder="ghp_…">
+              <button type="button" class="icon-btn" id="ghTokenShow" aria-label="Pokaż token" aria-pressed="false" title="Pokaż token">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+            <span class="field-hint" id="ghTokenHint">GitHub nie wpuszcza programów na samo hasło — zamiast niego jest token.
+              <a href="https://github.com/settings/tokens/new?description=CloudCut&amp;scopes=repo" target="_blank" rel="noopener">Utwórz token na GitHubie ↗</a>
+              (zaloguj się tam, zakres „repo” będzie już zaznaczony), kliknij „Generate token”, skopiuj go i wklej tutaj.</span></div>
+          <div class="gh-actions">
+            <button type="submit" class="btn primary small" id="ghSaveBtn">Zapisz i połącz</button>
+            <button type="button" class="btn small" id="ghCreate" hidden>Utwórz repozytorium</button>
+            <a class="btn small" id="ghOpenRepo" href="#" target="_blank" rel="noopener" hidden>Otwórz na GitHubie ↗</a>
+            <button type="button" class="btn small danger" id="ghForget" hidden>Odłącz GitHuba</button>
+          </div>
+        </fieldset>
+        <p class="gh-result" id="ghResult" role="status"></p>
+      </form>
+    </section>
+    <section class="set-gh" id="setUpdates" aria-labelledby="updTitle">
+      <h3 class="set-h gh-h" id="updTitle"><svg class="upd-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg> Aktualizacje programu</h3>
+      <p class="hint">Wklej link do repozytorium GitHub z kodem CloudCut. Gdy zmieni się tam któryś plik programu, CloudCut pokaże komunikat z wyborem „Zaakceptuj” albo „Przypomnij następnym razem”.</p>
+      <form id="updForm" novalidate>
+        <fieldset id="updFields">
+          <div class="gh-grid">
+            <div class="field"><label for="updRepo">Link do repozytorium z aktualizacjami</label>
+              <input type="text" id="updRepo" spellcheck="false" autocomplete="off" placeholder="https://github.com/twoja-nazwa/cloudcut"></div>
+            <div class="field"><label for="updBranch">Gałąź <span class="opt">(opcjonalnie)</span></label>
+              <input type="text" id="updBranch" spellcheck="false" autocomplete="off" placeholder="main"></div>
+          </div>
+          <label class="check"><input type="checkbox" id="updAuto" checked> Sprawdzaj przy każdym uruchomieniu programu</label>
+          <div class="gh-actions">
+            <button type="submit" class="btn primary small">Zapisz</button>
+            <button type="button" class="btn small" id="updCheckNow">Sprawdź teraz</button>
+            <button type="button" class="btn small" id="updShowFound" hidden>Pokaż aktualizację</button>
+            <button type="button" class="btn small" id="updRollback" hidden>Przywróć poprzednią wersję</button>
+          </div>
+        </fieldset>
+        <p class="gh-result" id="updResult" role="status"></p>
+        <p class="hint" id="updState"></p>
+      </form>
+    </section>
+    <section>
+      <h3 class="set-h">Układ okna</h3>
+      <div class="layout-grid" id="layoutGrid" role="radiogroup" aria-label="Szablon układu"></div>
+    </section>
+    <section class="set-cols">
+      <div>
+        <h3 class="set-h">Wielkość sekcji</h3>
+        <div id="sizeCtrls"></div>
+        <p class="hint">Krawędzie paneli możesz też przeciągać myszą bezpośrednio w oknie programu.</p>
+      </div>
+      <div>
+        <h3 class="set-h">Widoczne panele</h3>
+        <label class="check"><input type="checkbox" id="setShowBin"> Media, napisy i plansze</label>
+        <label class="check"><input type="checkbox" id="setShowInsp"> Właściwości</label>
+        <label class="check"><input type="checkbox" id="setShowMeter"> Wskaźnik głośności przy podglądzie</label>
+        <h3 class="set-h">Podgląd</h3>
+        <div class="field"><label for="setPreviewQ">Domyślna jakość podglądu</label>
+          <select id="setPreviewQ"><option value="1">Pełna</option><option value="0.5">Połowa</option><option value="0.25">Ćwierć</option></select></div>
+        <p class="hint" id="setSyncNote"></p>
+      </div>
+    </section>
+  </div>
+  <div class="dlg-actions"><button type="button" class="btn primary" id="setClose">Gotowe</button></div>
+</dialog>
+
+<div class="home" id="homeScreen" hidden>
+  <nav class="home-nav" aria-label="Menu główne">
+    <div class="auth-brand hn-brand"><span class="logo" aria-hidden="true"></span>CloudCut</div>
+    <div class="hn-tabs" role="tablist" aria-orientation="vertical" aria-label="Działy">
+      <button type="button" role="tab" id="hnProjects" data-hnav="projects" aria-controls="hpProjects" aria-selected="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/></svg>Projekty</button>
+      <button type="button" role="tab" id="hnSettings" data-hnav="settings" aria-controls="hpSettings" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Ustawienia</button>
+      <button type="button" role="tab" id="hnAccount" data-hnav="account" aria-controls="hpAccount" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>Konto<span class="hn-dot" id="hnAccountDot" hidden title="Zmień hasło początkowe"></span></button>
+    </div>
+    <button type="button" class="btn ghost small hn-back" id="homeBack" hidden title="Wróć do otwartego projektu (Esc)">← Wróć do projektu</button>
+    <button type="button" class="hn-user" id="homeAccount" title="Twoje konto">
+      <span class="avatar" id="homeAvatar" aria-hidden="true">?</span><span class="acc-mail" id="homeMail"></span>
+    </button>
+  </nav>
+  <div class="home-body" id="homeBody">
+  <main class="home-main" id="hpProjects" role="tabpanel" aria-labelledby="hnProjects">
+    <section class="home-hero">
+      <div>
+        <h1 id="homeHello">Witaj</h1>
+        <p class="home-sub" id="homeSub">Wybierz projekt albo zacznij nowy.</p>
+      </div>
+      <button type="button" class="home-continue" id="homeContinue" hidden>
+        <span class="hc-thumb" id="homeContThumb"></span>
+        <span class="hc-text"><small>Kontynuuj pracę</small><strong id="homeContName"></strong><span id="homeContMeta"></span></span>
+        <span class="hc-arrow" aria-hidden="true">→</span>
+      </button>
+    </section>
+
+    <section aria-labelledby="homeNewTitle">
+      <h2 class="home-h" id="homeNewTitle">Nowy projekt</h2>
+      <div class="new-grid" id="homeNew"></div>
+    </section>
+
+    <section aria-labelledby="homeListTitle">
+      <div class="home-list-head">
+        <h2 class="home-h" id="homeListTitle">Twoje projekty</h2>
+        <div class="home-tools">
+          <div class="seg" role="group" aria-label="Widok">
+            <button type="button" data-htab="list" aria-pressed="true">Projekty</button>
+            <button type="button" data-htab="trash" aria-pressed="false" id="homeTrashTab">Kosz</button>
+          </div>
+          <label class="sr-only" for="homeSearch">Szukaj projektu</label>
+          <input type="search" id="homeSearch" placeholder="Szukaj projektu…">
+          <label class="sr-only" for="homeSort">Sortowanie</label>
+          <select id="homeSort" class="mini-select">
+            <option value="recent">Ostatnio edytowane</option>
+            <option value="name">Nazwa A–Z</option>
+            <option value="long">Najdłuższe</option>
+          </select>
+          <button type="button" class="btn small" id="homeImport" title="Wczytaj projekty z pliku .zip (z „Eksportuj” albo pobrane z GitHuba)">Importuj…</button>
+          <input type="file" id="homeImportInput" accept=".zip,application/zip" hidden>
+        </div>
+      </div>
+      <div class="home-selbar" id="homeSelBar">
+        <label class="check sel-all"><input type="checkbox" id="homeSelAll"><span id="homeSelCount">Zaznacz projekty, żeby je zapisać na GitHubie, eksportować, powielić albo usunąć</span></label>
+        <div class="sel-acts" role="group" aria-label="Działania na zaznaczonych projektach">
+          <button type="button" class="btn small" data-bulk="dup">Duplikuj</button>
+          <button type="button" class="btn small" data-bulk="export">Eksportuj</button>
+          <button type="button" class="btn small danger" data-bulk="delete">Usuń</button>
+          <button type="button" class="gh-btn" id="ghPush" data-bulk="github">
+            <svg class="gh-mark" aria-hidden="true"><use href="#ghMark"/></svg>
+            <span id="ghPushLabel">Zapisz na GitHub</span>
+            <span class="gh-bar" id="ghPushBar" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+      <p class="gh-line" id="ghLine" role="status" hidden></p>
+      <div class="home-grid" id="homeList" aria-live="polite"></div>
+      <p class="hint home-stats" id="homeStats"></p>
+    </section>
+  </main>
+
+  <main class="home-main hp-narrow" id="hpSettings" role="tabpanel" aria-labelledby="hnSettings" hidden>
+    <div class="hp-head"><h1>Ustawienia</h1><button type="button" class="btn small" id="homeSetReset">Przywróć domyślny układ</button></div>
+    <!-- tu na czas zakładki trafia treść okna Ustawień (#setBody) — jedna kopia dla menu i edytora -->
+    <div id="homeSetHost"></div>
+  </main>
+
+  <main class="home-main hp-narrow" id="hpAccount" role="tabpanel" aria-labelledby="hnAccount" hidden>
+    <div class="hp-head"><h1>Konto</h1></div>
+    <section class="acc-card" id="accCard">
+      <span class="avatar big" id="accCardAvatar" aria-hidden="true">?</span>
+      <div class="acc-id"><strong id="accEmail"></strong><span id="accStats"></span></div>
+    </section>
+    <section class="set-gh" id="accPassBox" aria-labelledby="accPassTitle">
+      <h3 class="set-h" id="accPassTitle">Zmiana hasła</h3>
+      <p class="hint" id="accPassInfo">Wpisz obecne hasło, a potem dwa razy nowe.</p>
+      <form id="accPassForm" class="acc-form" novalidate>
+        <div class="field"><label for="accOld">Obecne hasło</label><input type="password" id="accOld" autocomplete="current-password" required></div>
+        <div class="field"><label for="accNew">Nowe hasło (min. 8 znaków)</label><input type="password" id="accNew" autocomplete="new-password" minlength="8" required></div>
+        <div class="field"><label for="accNew2">Powtórz nowe hasło</label><input type="password" id="accNew2" autocomplete="new-password" minlength="8" required></div>
+        <div class="gh-actions">
+          <button type="submit" class="btn primary small" id="accPassSave">Zmień hasło</button>
+          <label class="check acc-show"><input type="checkbox" id="accShow"> Pokaż hasła</label>
+        </div>
+        <p class="gh-result" id="accPassMsg" role="status"></p>
+      </form>
+    </section>
+    <section class="set-gh" id="accMore" aria-labelledby="accMoreTitle">
+      <h3 class="set-h" id="accMoreTitle">Konto i dane</h3>
+      <div class="gh-actions">
+        <button type="button" class="btn small" id="accMigrate">Przenieś projekty pracujące bez konta</button>
+        <button type="button" class="btn small" id="accLogout">Wyloguj się</button>
+        <button type="button" class="btn small danger" id="accDelete">Usuń konto…</button>
+      </div>
+    </section>
+    <section class="set-gh" id="accLocal" hidden>
+      <p class="hint">Pracujesz bez konta — projekty są tylko na tym urządzeniu, bez kosza, historii wersji i zapisu na GitHubie.</p>
+      <button type="button" class="btn primary small" id="accLogin">Zaloguj się lub załóż konto</button>
+    </section>
+  </main>
+  </div>
+</div>
+
+<div class="auth" id="authScreen" hidden>
+  <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="auth-brand"><span class="logo" aria-hidden="true"></span>CloudCut</div>
+    <h1 id="authTitle">Zaloguj się</h1>
+    <p class="auth-sub" id="authSub">Twoje projekty i pliki czekają na koncie.</p>
+    <div class="seg auth-seg" role="group" aria-label="Logowanie lub rejestracja">
+      <button type="button" data-auth="login" aria-pressed="true">Logowanie</button>
+      <button type="button" data-auth="register" aria-pressed="false">Nowe konto</button>
+    </div>
+    <form id="authForm" novalidate>
+      <div class="field"><label for="authEmail">E-mail</label>
+        <input type="email" id="authEmail" autocomplete="email" required spellcheck="false" placeholder="ty@firma.pl"></div>
+      <div class="field"><label for="authPass">Hasło</label>
+        <div class="pass-wrap"><input type="password" id="authPass" autocomplete="current-password" required minlength="8">
+        <button type="button" class="icon-btn" id="authShow" aria-label="Pokaż hasło" aria-pressed="false" title="Pokaż hasło">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <span class="field-hint" id="authPassHint" hidden>Co najmniej 8 znaków.</span></div>
+      <div class="field" id="authPass2Wrap" hidden><label for="authPass2">Powtórz hasło</label>
+        <input type="password" id="authPass2" autocomplete="new-password" minlength="8"></div>
+      <label class="check auth-remember"><input type="checkbox" id="authRemember" checked> Zapamiętaj mnie na tym komputerze (90 dni)</label>
+      <p class="auth-err" id="authErr" role="alert"></p>
+      <button type="submit" class="btn primary auth-submit" id="authSubmit">Zaloguj się</button>
+    </form>
+    <button type="button" class="linkbtn auth-local" id="authLocal">Pracuj bez konta — projekty tylko w tej przeglądarce</button>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "mediabunny": "/vendor/mediabunny.min.mjs" } }</script>
+<script src="js/fonts-data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/fonts.js"></script>
+<script src="js/render.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/transitions.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/premium.js"></script>
+<script src="js/export.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/cloud.js"></script>
+<script src="js/home.js"></script>
+<script src="js/github.js"></script>
+<script src="js/updates.js"></script>
+<script src="js/keys.js"></script>
+</body>
+</html>

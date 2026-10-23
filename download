@@ -1,0 +1,11 @@
+# Dane programu (konta, projekty, pliki) — zostają na komputerze
+data/
+
+# Konta startowe ze skrótem hasła — nie do repozytorium
+server/config.php
+
+# Pliki powstające przy budowaniu CloudCut.exe
+desktop/node_modules/
+desktop/dist/
+desktop/runtime/
+desktop/build/icon-256.png

@@ -1,0 +1,19 @@
+{
+  "name": "cloudcut",
+  "productName": "CloudCut",
+  "version": "1.0.0",
+  "description": "CloudCut — studio montażu wideo",
+  "author": "Adamczyk Usługi",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "runtime": "node scripts/prepare-runtime.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "start": "node scripts/prepare-runtime.mjs && electron .",
+    "build": "node scripts/make-icon.mjs && node scripts/prepare-runtime.mjs && node scripts/pack.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.7.0"
+  }
+}
