@@ -4,7 +4,15 @@
 const SYSTEM_FONTS = ['Arial', 'Georgia', 'Impact', 'Times New Roman', 'Verdana', 'Trebuchet MS', 'Courier New', 'Tahoma'];
 const FONT_INFO = new Map(GOOGLE_FONTS.map(([n, c, w, pl]) => [n, { cat: c, weights: w ? w.split(',').map(Number) : [400], pl: !!pl }]));
 for (const n of SYSTEM_FONTS) FONT_INFO.set(n, { cat: 'sys', weights: [400, 700], pl: true, system: true });
-const FONT_CATS = [['all', 'Wszystkie'], ['s', 'Bezszeryfowe'], ['r', 'Szeryfowe'], ['d', 'Ozdobne'], ['h', 'Odręczne'], ['m', 'Stałej szerokości'], ['sys', 'Systemowe']];
+const FONT_CATS = [['all', 'Wszystkie'], ['mine', 'Moje czcionki'], ['s', 'Bezszeryfowe'], ['r', 'Szeryfowe'], ['d', 'Ozdobne'], ['h', 'Odręczne'], ['m', 'Stałej szerokości'], ['sys', 'Systemowe']];
+// słowa, pod którymi ludzie szukają czcionek spoza Google Fonts → podobne, które są dostępne
+const FONT_TAGS = [
+  [['minecraft', 'minecrafter', 'pixel', 'piksel', '8bit', '8-bit', 'retro', 'arcade', 'gra', 'gry', 'game'],
+    ['Pixelify Sans', 'Press Start 2P', 'Silkscreen', 'VT323', 'Tiny5', 'Micro 5', 'Jersey 10', 'Workbench', 'Sixtyfour', 'DotGothic16']],
+  [['komiks', 'comic', 'kreskówka'], ['Bangers', 'Comic Neue', 'Luckiest Guy', 'Permanent Marker', 'Bubblegum Sans']],
+  [['horror', 'straszn', 'halloween'], ['Creepster', 'Nosifer', 'Butcherman', 'Eater', 'Metal Mania']],
+  [['youtube', 'miniatur', 'thumbnail', 'gruba'], ['Anton', 'Bebas Neue', 'Oswald', 'Archivo Black', 'Luckiest Guy']],
+];
 const WEIGHT_NAMES = { 100: 'Cienka', 200: 'Bardzo lekka', 300: 'Lekka', 400: 'Zwykła', 500: 'Średnia', 600: 'Półgruba', 700: 'Gruba', 800: 'Bardzo gruba', 900: 'Czarna' };
 
 const fontLinks = new Map(); // nazwa -> Promise wczytania pełnej czcionki
@@ -20,6 +28,7 @@ function nearestWeight(name, w) {
 /* Pełna czcionka (wszystkie grubości) — do podglądu i eksportu */
 function ensureFont(name) {
   const info = FONT_INFO.get(name);
+  if (info?.user) return userFontLoads.get(name) || Promise.resolve(); // czcionka z Biblioteki (library.js)
   if (!info || info.system) return Promise.resolve();
   if (fontLinks.has(name)) return fontLinks.get(name);
   const p = new Promise(resolve => {
@@ -46,7 +55,7 @@ async function ensureProjectFonts() {
 /* Podgląd nazwy czcionki: tylko znaki z nazwy, więc pobiera się kilka kilobajtów */
 function ensurePreview(name) {
   const info = FONT_INFO.get(name);
-  if (!info || info.system || previewLinks.has(name) || fontLinks.has(name)) return;
+  if (!info || info.system || info.user || previewLinks.has(name) || fontLinks.has(name)) return;
   previewLinks.add(name);
   const w = info.weights.includes(400) ? 400 : info.weights[0];
   const link = document.createElement('link');
@@ -77,7 +86,8 @@ function openFontPicker(anchor, current, onPick) {
       <label class="check fp-pl"><input type="checkbox" class="fp-plbox"${fp.pl ? ' checked' : ''}> Tylko z polskimi znakami (ą, ę, ł…)</label>
     </div>
     <div class="fp-count" aria-live="polite"></div>
-    <div class="fp-list" id="fpList" role="listbox" aria-label="Czcionki"></div>`;
+    <div class="fp-list" id="fpList" role="listbox" aria-label="Czcionki"></div>
+    <div class="fp-foot">Brakuje czcionki (np. Minecrafter)? <button type="button" class="linkbtn" data-fp-lib>Dodaj jej plik do Biblioteki</button> — pojawi się w „Moje czcionki” we wszystkich projektach.</div>`;
   document.body.appendChild(el);
   fp.el = el;
   const r = anchor.getBoundingClientRect();
@@ -96,6 +106,7 @@ function openFontPicker(anchor, current, onPick) {
   search.addEventListener('keydown', fpKey);
   el.querySelector('.fp-plbox').addEventListener('change', e => { fp.pl = e.target.checked; filterFonts(); });
   el.addEventListener('click', e => {
+    if (e.target.closest('[data-fp-lib]')) { closeFontPicker(); $('#libInput').click(); return; } // ten sam wybór plików co w Bibliotece
     const cat = e.target.closest('[data-cat]');
     if (cat) {
       fp.cat = cat.dataset.cat;
@@ -125,11 +136,20 @@ function filterFonts() {
   const q = fp.q;
   let items = all.filter(([n, i]) => (fp.cat === 'all' || i.cat === fp.cat) && (!fp.pl || i.pl) && (!q || n.toLowerCase().includes(q)));
   if (q) items.sort((a, b) => (a[0].toLowerCase().startsWith(q) ? 0 : 1) - (b[0].toLowerCase().startsWith(q) ? 0 : 1));
+  // grupy na liście: ostatnio używane, podobne do szukanego słowa, moje czcionki, reszta
   const rec = !q && fp.cat === 'all' ? recentFonts.filter(n => FONT_INFO.has(n)) : [];
-  fp.items = [...rec.map(n => [n, FONT_INFO.get(n), true]), ...items.filter(([n]) => !rec.includes(n))];
+  const similar = q.length >= 3 && (fp.cat === 'all' || fp.cat === 'd')
+    ? [...new Set(FONT_TAGS.filter(([keys]) => keys.some(k => k.startsWith(q) || q.startsWith(k))).flatMap(([, f]) => f))].filter(n => FONT_INFO.has(n))
+    : [];
+  const taken = new Set([...rec, ...similar]);
+  const mine = items.filter(([n, i]) => i.user && !taken.has(n));
+  const rest = items.filter(([n, i]) => !i.user && !taken.has(n));
+  fp.items = [...rec.map(n => [n, FONT_INFO.get(n), 'rec']), ...similar.map(n => [n, FONT_INFO.get(n), 'sim']), ...mine.map(([n, i]) => [n, i, 'mine']), ...rest.map(([n, i]) => [n, i, ''])];
   fp.shown = 0;
   fp.el.querySelector('.fp-list').innerHTML = '';
-  fp.el.querySelector('.fp-count').textContent = `${items.length} ${items.length === 1 ? 'czcionka' : 'czcionek'}`;
+  const total = items.length + similar.filter(n => !items.some(([m]) => m === n)).length;
+  fp.el.querySelector('.fp-count').textContent = `${total} ${plural(total, 'czcionka', 'czcionki', 'czcionek').replace(/^\d+ /, '')}`
+    + (q && !items.length && similar.length ? ` — „${fp.q}” nie ma w Google Fonts, poniżej podobne` : '');
   renderFontItems(80);
   highlightFont();
 }
@@ -137,9 +157,11 @@ function renderFontItems(n) {
   const list = fp.el.querySelector('.fp-list');
   const slice = fp.items.slice(fp.shown, fp.shown + n);
   const catName = Object.fromEntries(FONT_CATS);
-  const html = slice.map(([name, info, recent], i) => {
+  const GROUP = { rec: 'Ostatnio używane', sim: `Podobne do „${esc(fp.q)}”`, mine: 'Moje czcionki (z Biblioteki)', '': 'Wszystkie' };
+  const html = slice.map(([name, info, group], i) => {
     const idx = fp.shown + i;
-    const sep = recent && idx === 0 ? '<div class="fp-sep">Ostatnio używane</div>' : (!recent && fp.items[idx - 1]?.[2]) ? '<div class="fp-sep">Wszystkie</div>' : '';
+    const prev = idx > 0 ? fp.items[idx - 1][2] : null;
+    const sep = group !== prev && (idx > 0 || group) ? `<div class="fp-sep">${GROUP[group]}</div>` : '';
     return `${sep}<button type="button" class="fp-item${name === fp.current ? ' cur' : ''}" role="option" id="fpo-${idx}" data-i="${idx}" data-font="${esc(name)}" aria-selected="${name === fp.current}">
       <span class="fp-name" style="font-family:'${esc(name)}',sans-serif">${esc(name)}</span><span class="fp-meta">${catName[info.cat] || ''} · ${info.weights.length} ${info.weights.length === 1 ? 'grubość' : 'grubości'}</span></button>`;
   }).join('');

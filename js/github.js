@@ -5,7 +5,7 @@
 let ghInfo = null;   // ustawienia z serwera: repo, gałąź, czy jest token, ostatni zapis, stan wysyłki
 let ghPoll = null;
 
-const fmtMB = b => (b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB');
+const fmtMB = b => (b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
 
 async function ghLoad() {
   if (Store.mode !== 'cloud') { ghInfo = null; return null; }
@@ -49,37 +49,112 @@ function ghStartPolling() {
   }, 700);
 }
 async function ghFinished(s) {
+  const imp = s?.kind === 'import';
   if (s?.state === 'done') {
     const r = s.result || {};
-    toast(r.unchanged ? 'Na GitHubie wszystko jest już aktualne'
-      : `Zapisano na GitHubie: ${plural(r.projects || 0, 'projekt', 'projekty', 'projektów')}, wysłano ${plural(r.files || 0, 'plik', 'pliki', 'plików')} (${fmtMB(r.bytes || 0)})`, 5000);
+    toast(imp ? `Pobrano z GitHuba „${r.name}” (${plFiles(r.files || 0)}, ${fmtMB(r.bytes || 0)})${r.missing?.length ? ` · brak: ${r.missing.join(', ')}` : ''} — jest w Projektach`
+      : r.unchanged ? 'Na GitHubie wszystko jest już aktualne'
+      : `Zapisano na GitHubie: ${plural(r.projects || 0, 'projekt', 'projekty', 'projektów')}, wysłano ${plural(r.files || 0, 'plik', 'pliki', 'plików')} (${fmtMB(r.bytes || 0)})`, 6000);
   } else if (s?.state === 'error') {
-    toast('Wysyłka na GitHuba nie udała się — szczegóły pod przyciskiem', 5000);
+    toast(imp ? `Nie udało się pobrać projektu: ${s.error}` : 'Wysyłka na GitHuba nie udała się — szczegóły pod przyciskiem', 6000);
   }
   await ghLoad();
-  if (isHomeOpen()) renderHomeList();
+  if (isHomeOpen()) { await loadHomeList(); if (homeView === 'github') ghpLoad(); }
   ghRenderProgress();
 }
 function ghRenderProgress() {
-  const s = ghInfo?.status, running = s?.state === 'running';
+  const s = ghInfo?.status, running = s?.state === 'running', pushing = running && s.kind !== 'import';
   const btn = $('#ghPush');
   btn.classList.toggle('busy', running);
   btn.setAttribute('aria-busy', running ? 'true' : 'false');
-  $('#ghPushLabel').textContent = running ? `Wysyłanie… ${s.pct || 0}%` : 'Zapisz na GitHub';
-  $('#ghPushBar').style.width = running ? `${s.pct || 0}%` : '0';
+  $('#ghPushLabel').textContent = pushing ? `Wysyłanie… ${s.pct || 0}%` : 'Zapisz na GitHub';
+  $('#ghPushBar').style.width = pushing ? `${s.pct || 0}%` : '0';
   ghRenderLine();
+  ghpRenderLine();
 }
+
+/* ---------- Zakładka „Projekty (GitHub)” ---------- */
+let ghpData = null, ghpError = '';
+async function ghpLoad() {
+  const list = $('#ghpList');
+  if (Store.mode !== 'cloud') {
+    ghpData = null;
+    list.innerHTML = '<div class="home-empty"><strong>Zaloguj się</strong>Projekty na GitHubie są dostępne dla konta CloudCut połączonego z GitHubem.</div>';
+    ghpRenderLine();
+    return;
+  }
+  list.setAttribute('aria-busy', 'true');
+  if (!ghpData) list.innerHTML = '<p class="hint">Wczytywanie projektów z GitHuba…</p>';
+  try {
+    ghpData = await api('GET', 'github/projects');
+    ghpError = '';
+  } catch (ex) {
+    ghpData = null;
+    ghpError = ex.message;
+  }
+  list.removeAttribute('aria-busy');
+  ghpRender();
+}
+function ghpRender() {
+  const list = $('#ghpList');
+  if (ghpError) {
+    list.innerHTML = `<div class="home-empty"><strong>Nie udało się wczytać projektów z GitHuba</strong>${esc(ghpError)}<br><button type="button" class="btn small" data-gh-settings>Ustawienia GitHuba</button></div>`;
+    ghpRenderLine();
+    return;
+  }
+  const ps = ghpData?.projects || [];
+  const busy = ghInfo?.status?.state === 'running';
+  list.innerHTML = ps.length ? ps.map(p => `<div class="proj-card gh-card">
+      <div class="pc-open gh-card-top">
+        <span class="pc-thumb">${p.thumb ? `<img src="/api/github/thumb?folder=${encodeURIComponent(p.folder)}&v=${p.saved}" alt="" loading="lazy">` : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg>'}
+          ${p.local ? `<span class="pc-badge${p.localNewer ? ' newer' : ''}">${p.localNewer ? 'nowszy na komputerze' : 'na komputerze'}</span>` : ''}</span>
+        <span class="pc-name">${esc(p.name)}</span>
+        <span class="pc-meta">${p.saved ? `zapisany ${relTime(p.saved * 1000)}` : 'na GitHubie'}${p.duration ? ' · ' + shortDur(p.duration) : ''}</span>
+      </div>
+      <div class="pc-acts">
+        <button type="button" class="btn small${p.local ? '' : ' primary'}" data-ghp-import="${esc(p.folder)}"${busy ? ' disabled' : ''}
+          title="${p.local ? 'Ten projekt jest już na komputerze — pobierze się jako osobna kopia' : 'Pobierz projekt z plikami do CloudCut'}">${p.local ? 'Pobierz jako kopię' : 'Pobierz do CloudCut'}</button>
+        <a class="btn small" href="${esc(p.url)}" target="_blank" rel="noopener" title="Otwórz folder projektu na GitHubie">GitHub ↗</a>
+      </div></div>`).join('')
+    : '<div class="home-empty"><strong>Na GitHubie nie ma jeszcze projektów</strong>Zaznacz projekty w zakładce Projekty i kliknij czarny przycisk „Zapisz na GitHub”.</div>';
+  ghpRenderLine();
+}
+function ghpRenderLine() {
+  const el = $('#ghpLine'), s = ghInfo?.status;
+  el.className = 'gh-line';
+  if (s?.state === 'running' && s.kind === 'import') {
+    el.textContent = (s.note || s.step || 'Pobieranie…') + (s.total ? ` · ${fmtMB(s.bytes || 0)} z ${fmtMB(s.total)}` : '') + ` · ${s.pct || 0}%`;
+    return;
+  }
+  if (s?.state === 'error' && s.kind === 'import') { el.classList.add('err'); el.textContent = 'Ostatnie pobieranie nie udało się: ' + (s.error || ''); return; }
+  el.innerHTML = ghpData ? `Repozytorium <a href="${esc(ghpData.repoUrl)}" target="_blank" rel="noopener">${esc(ghpData.repo)} ↗</a> · ${plural(ghpData.projects.length, 'projekt', 'projekty', 'projektów')}` : '';
+}
+$('#ghpRefresh').addEventListener('click', () => ghpLoad());
+$('#ghpList').addEventListener('click', async e => {
+  const b = e.target.closest('[data-ghp-import]');
+  if (!b) return;
+  if (ghInfo?.status?.state === 'running') { toast('Poczekaj, aż skończy się bieżące zadanie z GitHubem'); return; }
+  b.disabled = true;
+  try {
+    const r = await api('POST', 'github/import', { folder: b.dataset.ghpImport });
+    ghInfo = ghInfo || {};
+    ghInfo.status = r.status;
+    ghRenderProgress();
+    ghpRender();
+    ghStartPolling();
+  } catch (ex) { toast(ex.message, 5000); b.disabled = false; }
+});
 function ghRenderLine() {
   const el = $('#ghLine'), s = ghInfo?.status;
   el.className = 'gh-line';
   el.hidden = !ghInfo || homeTab === 'trash';
   if (el.hidden) return;
   if (s?.state === 'running') {
-    el.textContent = (s.note || s.step || 'Wysyłanie…') + (s.total ? ` · ${fmtMB(s.bytes || 0)} z ${fmtMB(s.total)}` : '');
+    el.textContent = (s.kind === 'import' ? 'Pobieranie projektu z GitHuba: ' : '') + (s.note || s.step || 'Wysyłanie…') + (s.total ? ` · ${fmtMB(s.bytes || 0)} z ${fmtMB(s.total)}` : '');
     return;
   }
   const repoLink = ghInfo.repoUrl ? ` · <a href="${esc(ghInfo.lastUrl || ghInfo.repoUrl)}" target="_blank" rel="noopener">${esc(ghInfo.repoName)} ↗</a>` : '';
-  if (s?.state === 'error') {
+  if (s?.state === 'error' && s.kind !== 'import') {
     el.classList.add('err');
     el.innerHTML = `Ostatnia wysyłka na GitHuba nie udała się: ${esc(s.error || '')} <button type="button" class="linkbtn" data-gh-settings>Ustawienia GitHuba</button>`;
     return;

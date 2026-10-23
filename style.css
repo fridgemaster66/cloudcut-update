@@ -856,6 +856,67 @@ body.dragging-files .dropzone { display: grid; }
 #ghFields:disabled, #updFields:disabled { opacity: .5; }
 .field > label:has(.opt) { justify-content: flex-start; }
 .upd-mode { max-width: 420px; }
+/* zakładka Aktualizacje */
+.upd-status { display: grid; gap: 8px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; font-size: 13.5px; line-height: 1.5; }
+.upd-status.ok { border-color: rgba(95,211,141,.45); }
+.upd-status.ok .upd-status-main { color: #5fd38d; }
+.upd-status.warn { border-color: rgba(240,195,106,.5); }
+.upd-status.err { border-color: rgba(255,122,122,.5); color: var(--danger); }
+.upd-status-main .btn { margin-left: 8px; }
+.upd-status-meta { font-size: 12px; color: var(--muted); }
+.upd-status-meta .linkbtn { margin-left: 6px; }
+.upd-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-left: 2px solid var(--line); margin-left: 6px; }
+.upd-item { position: relative; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 4px 16px; padding: 10px 0 12px 18px; }
+.upd-item::before { content: ''; position: absolute; left: -7px; top: 15px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel-3); border: 2px solid var(--accent); }
+.upd-item time { font-weight: 700; font-size: 12.5px; color: #cfdcff; font-variant-numeric: tabular-nums; padding-top: 1px; }
+.upd-body { min-width: 0; }
+.upd-body strong { font-size: 13.5px; }
+.upd-desc { margin: 4px 0 2px; color: var(--muted); font-size: 12.5px; white-space: pre-line; overflow-wrap: anywhere; }
+.upd-meta { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+.upd-meta a { color: var(--accent); }
+.upd-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; vertical-align: 1px; }
+.upd-badge.inst { background: rgba(95,211,141,.16); color: #6fdc8c; }
+.upd-badge.new { background: rgba(107,149,255,.2); color: #b5caff; }
+.upd-badge.old { background: rgba(240,195,106,.16); color: #f0c36a; }
+.upd-empty { padding: 10px 0 10px 18px; color: var(--muted); font-size: 13px; }
+.upd-empty.err { color: var(--danger); }
+@media (max-width: 640px) { .upd-item { grid-template-columns: 1fr; } }
+/* Projekty (GitHub) */
+.hp-title { display: flex; align-items: center; gap: 10px; }
+.hp-title .gh-mark { width: 26px; height: 26px; }
+.hn-tabs .gh-mark { width: 18px; height: 18px; }
+.gh-card-top { cursor: default; }
+.gh-card .pc-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.gh-card .pc-acts { padding-top: 0; }
+.pc-badge.newer { background: #9a6b00; }
+/* Biblioteka */
+.lib-drop {
+  display: block; width: 100%; padding: 22px 16px; text-align: center; cursor: pointer; color: var(--muted); font-size: 13px;
+  background: rgba(107,149,255,.05); border: 1.5px dashed #3a4256; border-radius: 12px;
+}
+.lib-drop:hover, .lib-dragging .lib-drop { border-color: var(--accent); color: var(--text); background: rgba(107,149,255,.1); }
+.lib-cats { flex-wrap: wrap; }
+.lib-n { color: var(--muted); font-weight: 500; margin-left: 2px; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.lib-card { position: relative; display: grid; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.lib-card:hover { border-color: #46506a; }
+.lib-thumb { position: relative; aspect-ratio: 16 / 9; background: #07080a center / cover no-repeat; overflow: hidden; }
+.lib-wave { background-color: #0f2a20; background-size: 100% 70%; background-repeat: no-repeat; }
+.lib-other > * { position: absolute; inset: 0; }
+.lib-font {
+  display: grid; place-items: center; aspect-ratio: 16 / 9; padding: 8px; overflow: hidden;
+  background: linear-gradient(135deg, #1b2240, #2a1d3d); color: #fff; font-size: 30px; line-height: 1.1; text-align: center; white-space: nowrap;
+}
+.lib-info { display: grid; gap: 2px; padding: 8px 10px 10px; min-width: 0; }
+.lib-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-meta { font-size: 11.5px; color: var(--muted); }
+.lib-acts { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.lib-card:hover .lib-acts, .lib-acts:focus-within { opacity: 1; }
+.lib-acts .icon-btn { width: 28px; height: 28px; background: rgba(0,0,0,.7); color: #fff; }
+.lib-acts .icon-btn svg { width: 15px; height: 15px; }
+#hpLibrary.lib-dragging { outline: 2px dashed var(--accent); outline-offset: -8px; }
+/* wybór czcionek: podpowiedź o własnych plikach */
+.fp-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); line-height: 1.45; }
 /* kolor avatara */
 .av-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
 .av-pick {

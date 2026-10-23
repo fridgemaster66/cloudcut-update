@@ -211,6 +211,9 @@ function renderSettings() {
   $('#setShowMeter').checked = ui.showMeter;
   $('#setPreviewQ').value = String(ui.previewQ);
   $('#setSyncNote').textContent = Store.mode === 'cloud' ? 'Ustawienia i skróty zapisują się na Twoim koncie — zobaczysz je po zalogowaniu na innym komputerze.' : 'Ustawienia zapisują się w tej przeglądarce.';
+}
+/* Kolor avatara — w zakładce Konto */
+function renderAvatarGrid() {
   const initial = Store.mode === 'cloud' ? Store.user.email[0].toUpperCase() : '?';
   $('#avatarGrid').innerHTML = AVATARS.map(a => `<button type="button" class="av-pick${ui.avatar === a.id ? ' on' : ''}" role="radio" aria-checked="${ui.avatar === a.id}" data-avatar="${a.id}" title="${a.name}">
     <span class="avatar" style="background:${a.bg};color:${a.fg}" aria-hidden="true">${esc(initial)}</span><span class="av-name">${a.name}</span></button>`).join('');
@@ -263,7 +266,7 @@ $('#avatarGrid').addEventListener('click', e => {
   const b = e.target.closest('[data-avatar]');
   if (!b) return;
   ui.avatar = b.dataset.avatar;
-  applyAvatar(); saveUi(); renderSettings();
+  applyAvatar(); saveUi(); renderAvatarGrid();
   $(`[data-avatar="${ui.avatar}"]`)?.focus();
 });
 $('#avatarGrid').addEventListener('keydown', e => {

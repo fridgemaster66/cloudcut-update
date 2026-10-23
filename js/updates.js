@@ -79,6 +79,8 @@ $('#updCheckNow').addEventListener('click', async () => {
       updShow(updFound);
     } else if (updFound.incomplete) {
       updResult(updIncompleteMsg(updFound), 'warn');
+    } else if (updFound.ahead) {
+      updResult(`Na tym komputerze jest nowsza wersja programu niż w <strong>${esc(updFound.repo)}</strong> (${plural(updFound.files.length, 'nowszy plik', 'nowsze pliki', 'nowszych plików')}) — nic nie instaluję. Wyślij nową wersję do repozytorium, żeby było aktualne.`, 'warn');
     } else {
       updResult(`✓ Masz najnowszą wersję z ${esc(updFound.repo)}.`, 'ok');
     }
@@ -132,6 +134,8 @@ function updWatch() {
 }
 /* Pokazuje znalezioną aktualizację, chyba że użytkownik odłożył właśnie tę wersję („Przypomnij następnym razem”) */
 function updOffer() {
+  updSetDot();
+  if (isHomeOpen() && homeView === 'updates') updpLoad();
   if (!updFound?.available || $('#updDlg').open) return;
   let later = null;
   try { later = sessionStorage.getItem(UPD_LATER); } catch { /* bez pamięci sesji */ }
@@ -184,4 +188,88 @@ $('#updAccept').addEventListener('click', async () => {
     $('#updLater').disabled = false;
     btn.textContent = 'Zaakceptuj i zainstaluj';
   }
+});
+
+/* ---------- Zakładka „Aktualizacje” w menu głównym ---------- */
+let updHist = null;
+// data i godzina co do minuty, np. „23.10.2026, 16:05”
+const fmtDT = v => new Date(typeof v === 'number' ? v : Date.parse(v)).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const UPD_MODE_NAMES = { watch: 'przy każdej zmianie w repozytorium (co 3 minuty)', start: 'przy każdym uruchomieniu programu', manual: 'tylko ręcznie' };
+function updSetDot() { $('#hnUpdatesDot').hidden = !updFound?.available; }
+async function updpLoad() {
+  if (Store.mode !== 'cloud') {
+    updHist = null;
+    $('#updpStatus').className = 'upd-status';
+    $('#updpStatus').textContent = 'Zaloguj się, żeby sprawdzać i instalować aktualizacje.';
+    $('#updpCommits').innerHTML = $('#updpLog').innerHTML = '';
+    return;
+  }
+  if (!updHist) $('#updpStatus').textContent = 'Wczytywanie historii aktualizacji…';
+  try { updHist = await api('GET', 'update/history'); } catch (ex) { updHist = { commits: [], log: [], commitsError: ex.message }; }
+  if (updHist.check) { updFound = updHist.check; updSetDot(); }
+  updpRender();
+}
+function updpRender() {
+  const h = updHist || {}, c = h.check;
+  const st = $('#updpStatus');
+  let kind = '', html = '';
+  if (h.checkError) { kind = 'err'; html = esc(h.checkError); }
+  else if (!c) { html = 'Program jeszcze nie sprawdzał aktualizacji.'; }
+  else if (c.available) {
+    kind = 'warn';
+    html = `<strong>Dostępna aktualizacja:</strong> „${esc((c.message || '').split('\n')[0])}”${c.date ? ` z ${fmtDT(c.date)}` : ''} · ${plFiles(c.files.length)}
+      <button type="button" class="btn primary small" id="updpInstall"${c.canApply ? '' : ' disabled'}>Zainstaluj…</button>`;
+  } else if (c.incomplete) { kind = 'warn'; html = updIncompleteMsg(c); }
+  else if (c.ahead) { kind = 'warn'; html = `Na tym komputerze jest nowsza wersja programu niż w <strong>${esc(c.repo)}</strong> (${plural(c.files.length, 'nowszy plik', 'nowsze pliki', 'nowszych plików')}) — nic nie trzeba instalować. Repozytorium czeka na wysłanie nowej wersji.`; }
+  else { kind = 'ok'; html = `✓ Masz najnowszą wersję programu z <strong>${esc(c.repo)}</strong>.`; }
+  const lc = h.lastCheck?.at ? `Ostatnio sprawdzono: ${fmtDT(h.lastCheck.at * 1000)}` : '';
+  const inst = h.installed ? `Zainstalowana aktualizacja: „${esc(h.installed.message.split('\n')[0])}” (${fmtDT(h.installed.at * 1000)})` : 'Program w wersji z instalacji';
+  st.className = 'upd-status' + (kind ? ' ' + kind : '');
+  st.innerHTML = `<div class="upd-status-main">${html}</div>
+    <div class="upd-status-meta">${[inst, lc, `sprawdzanie ${UPD_MODE_NAMES[h.mode] || ''}`].filter(Boolean).join(' · ')}
+      ${h.backup ? '<button type="button" class="linkbtn" id="updpRollback">Przywróć poprzednią wersję</button>' : ''}</div>`;
+  $('#updpSub').innerHTML = h.repo ? `Zmiany w <a href="${esc(h.repoUrl)}" target="_blank" rel="noopener">${esc(h.repo)} ↗</a> (gałąź ${esc(h.branch)}) i to, co zainstalowano na tym komputerze.` : 'Ostatnie zmiany programu i to, co zainstalowano na tym komputerze.';
+  // historia repozytorium
+  const commits = h.commits || [];
+  $('#updpCommits').innerHTML = h.commitsError ? `<li class="upd-empty err">${esc(h.commitsError)}</li>`
+    : !commits.length ? '<li class="upd-empty">Repozytorium z aktualizacjami jest puste.</li>'
+    : commits.map((cm, i) => {
+      const badges = [];
+      if (h.installed?.sha === cm.sha) badges.push('<span class="upd-badge inst">zainstalowana</span>');
+      if (c?.available && c.sha === cm.sha) badges.push('<span class="upd-badge new">dostępna</span>');
+      if (i === 0 && c && c.sha === cm.sha && !c.available && !c.ahead && !c.incomplete) badges.push('<span class="upd-badge inst">taka jak na komputerze</span>');
+      if (i === 0 && c?.ahead && c.sha === cm.sha) badges.push('<span class="upd-badge old">starsza niż na komputerze</span>');
+      return `<li class="upd-item"><time datetime="${esc(cm.date)}">${esc(fmtDT(cm.date))}</time>
+        <div class="upd-body"><strong>${esc(cm.title)}</strong> ${badges.join('')}
+          ${cm.body ? `<p class="upd-desc">${esc(cm.body.length > 400 ? cm.body.slice(0, 400) + '…' : cm.body)}</p>` : ''}
+          <span class="upd-meta">${cm.author ? esc(cm.author) + ' · ' : ''}<a href="${esc(cm.url)}" target="_blank" rel="noopener">${esc(cm.sha.slice(0, 7))} ↗</a></span></div></li>`;
+    }).join('');
+  // dziennik tego komputera
+  const log = h.log || [];
+  $('#updpLog').innerHTML = log.length ? log.map(e => `<li class="upd-item"><time datetime="${new Date(e.at * 1000).toISOString()}">${esc(fmtDT(e.at * 1000))}</time>
+      <div class="upd-body"><strong>${e.type === 'rollback' ? 'Przywrócono poprzednią wersję' : 'Zainstalowano aktualizację'}</strong>
+        ${e.message ? `<p class="upd-desc">${e.type === 'rollback' ? 'Cofnięto: ' : ''}„${esc(e.message.split('\n')[0])}”</p>` : ''}
+        <span class="upd-meta">${plFiles(e.count || (e.files || []).length)}${e.files?.length ? ': ' + esc(e.files.slice(0, 6).join(', ')) + (e.files.length > 6 ? '…' : '') : ''}</span></div></li>`).join('')
+    : '<li class="upd-empty">Na tym komputerze nie instalowano jeszcze aktualizacji.</li>';
+}
+$('#updpStatus').addEventListener('click', async e => {
+  if (e.target.closest('#updpInstall') && updFound?.available) updShow(updFound);
+  if (e.target.closest('#updpRollback')) $('#updRollback').click(); // ten sam przycisk co w Ustawieniach (pyta o potwierdzenie)
+});
+$('#updpCheck').addEventListener('click', async () => {
+  const btn = $('#updpCheck');
+  btn.disabled = true;
+  $('#updpStatus').className = 'upd-status';
+  $('#updpStatus').textContent = 'Sprawdzanie repozytorium…';
+  try {
+    updFound = await api('POST', 'update/check');
+    updSetDot();
+  } catch (ex) { toast(ex.message, 5000); }
+  await updpLoad();
+  btn.disabled = false;
+  if (updFound?.available) updShow(updFound);
+});
+$('#updpSettings').addEventListener('click', () => {
+  homeNav('settings');
+  setTimeout(() => $('#setUpdates').scrollIntoView({ block: 'start' }), 50);
 });

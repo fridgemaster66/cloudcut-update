@@ -579,8 +579,21 @@ try {
                 if (!$ids) fail(404, 'Nie ma takich projektów');
                 $cfg = ghConfig($uid);
                 if (!$cfg['token'] || !parseRepo((string) $cfg['repo'])) fail(428, 'Najpierw podaj w Ustawieniach token GitHub i link do repozytorium');
-                if (($st = ghStatus($uid)) && $st['state'] === 'running') fail(409, 'Wysyłka już trwa — poczekaj, aż się skończy');
-                ghStartWorker($uid, $ids);
+                if (($st = ghStatus($uid)) && $st['state'] === 'running') fail(409, 'Trwa inne zadanie z GitHubem — poczekaj, aż się skończy');
+                ghStartWorker($uid, ['type' => 'push', 'projects' => $ids]);
+                out(200, ['status' => ghStatus($uid)]);
+            }
+            if ($sub === 'projects' && $method === 'GET') out(200, ghListProjects($uid));
+            if ($sub === 'thumb' && $method === 'GET') {
+                $f = ghThumbFile($uid, (string) ($_GET['folder'] ?? ''));
+                if (!$f) fail(404, 'Brak miniatury');
+                sendFile($f[0], $f[1]);
+            }
+            if ($sub === 'import' && $method === 'POST') {
+                $folder = (string) (body()['folder'] ?? '');
+                if (!preg_match('#^projekty/[A-Za-z0-9._-]+$#', $folder)) fail(422, 'Nieprawidłowy projekt');
+                if (($st = ghStatus($uid)) && $st['state'] === 'running') fail(409, 'Trwa inne zadanie z GitHubem — poczekaj, aż się skończy');
+                ghStartWorker($uid, ['type' => 'import', 'folder' => $folder]);
                 out(200, ['status' => ghStatus($uid)]);
             }
         } catch (GhError $e) {
@@ -619,6 +632,16 @@ try {
             }
             if ($sub === 'check' && $method === 'POST') out(200, updCheck($uid));
             if ($sub === 'poll' && $method === 'POST') out(200, updPoll($uid));
+            if ($sub === 'history' && $method === 'GET') {
+                // zakładka Aktualizacje: każda część osobno, żeby błąd jednej nie chował reszty
+                $h = ['commits' => []];
+                $check = $commitsError = $checkError = null;
+                try { $h = updCommits($uid); } catch (GhError $e) { $commitsError = $e->getMessage(); }
+                try { $check = updPoll($uid); } catch (GhError $e) { $checkError = $e->getMessage(); }
+                $c = updConfig();
+                out(200, $h + ['check' => $check, 'checkError' => $checkError, 'commitsError' => $commitsError, 'log' => $c['log'] ?: [],
+                    'installed' => $c['installed'], 'lastCheck' => $c['lastCheck'], 'backup' => (bool) $c['backup'], 'mode' => $c['mode'], 'canApply' => updCanApply()]);
+            }
             if ($sub === 'apply' && $method === 'POST') out(200, updApply($uid));
             if ($sub === 'rollback' && $method === 'POST') out(200, updRollback());
         } catch (GhError $e) {

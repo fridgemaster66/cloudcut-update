@@ -32,7 +32,45 @@ function updConfig(): array {
     // starsze ustawienia miały pole „auto” (tak/nie) zamiast trybu
     if (!isset($c['mode']) && isset($c['auto'])) $c['mode'] = $c['auto'] ? 'start' : 'manual';
     return $c + ['repo' => UPD_DEFAULT_REPO, 'branch' => '', 'mode' => 'watch', 'installed' => null, 'backup' => null, 'lastCheck' => null,
-        'lastResult' => null, 'etag' => null, 'defaultBranch' => null];
+        'lastResult' => null, 'etag' => null, 'defaultBranch' => null, 'log' => []];
+}
+/* Dziennik tego komputera: instalacje i przywrócenia (do zakładki Aktualizacje) */
+function updLog(array $entry): void {
+    $log = updConfig()['log'] ?: [];
+    array_unshift($log, $entry + ['at' => time()]);
+    updSave(['log' => array_slice($log, 0, 50)]);
+}
+/* Ostatnie zmiany w repozytorium aktualizacji: opis, autor, data co do minuty */
+function updCommits(int $uid, int $limit = 20): array {
+    $c = updConfig();
+    $repo = parseRepo((string) $c['repo']);
+    if (!$repo || !$repo[0]) throw new GhError('Podaj w Ustawieniach link do repozytorium z aktualizacjami.');
+    [$owner, $name] = $repo;
+    $token = updToken($uid);
+    $branch = $c['branch'] ?: (string) $c['defaultBranch'];
+    if (!$branch) {
+        $info = ghCall('GET', ghApi() . "/repos/$owner/$name", $token);
+        if ($info['code'] === 404) throw new GhError("Nie widzę repozytorium $owner/$name. Jeśli jest prywatne, połącz konto GitHub w Ustawieniach.");
+        if ($info['code'] !== 200) ghFail($info, 'repozytorium aktualizacji');
+        $branch = (string) ($info['json']['default_branch'] ?? 'main');
+        updSave(['defaultBranch' => $branch]);
+    }
+    $out = ['repo' => "$owner/$name", 'repoUrl' => ghWeb() . "/$owner/$name", 'branch' => $branch, 'commits' => []];
+    $r = ghCall('GET', ghApi() . "/repos/$owner/$name/commits?sha=" . rawurlencode($branch) . "&per_page=$limit", $token);
+    if ($r['code'] === 409) return $out; // puste repozytorium
+    if ($r['code'] === 404) throw new GhError("Nie widzę repozytorium $owner/$name albo gałęzi $branch.");
+    if ($r['code'] !== 200) ghFail($r, 'historia zmian');
+    foreach ($r['json'] ?? [] as $cm) {
+        [$title, $body] = array_pad(explode("\n", trim((string) ($cm['commit']['message'] ?? '')), 2), 2, '');
+        $out['commits'][] = [
+            'sha' => (string) $cm['sha'], 'title' => $title,
+            'body' => trim((string) preg_replace('/^Co-Authored-By:.*$/mi', '', $body)),
+            'date' => (string) ($cm['commit']['author']['date'] ?? $cm['commit']['committer']['date'] ?? ''),
+            'author' => (string) ($cm['author']['login'] ?? $cm['commit']['author']['name'] ?? ''),
+            'url' => (string) ($cm['html_url'] ?? ghWeb() . "/$owner/$name/commit/{$cm['sha']}"),
+        ];
+    }
+    return $out;
 }
 /* Wynik sprawdzenia dotyczy konkretnego repozytorium i gałęzi — po zmianie ustawień jest nieważny */
 function updRepoKey(array $c): string { return strtolower(trim((string) $c['repo'])) . '|' . $c['branch']; }
@@ -136,8 +174,11 @@ function updCheck(int $uid): array {
         if ($local !== $sha) $changed[] = ['path' => $rel, 'sha' => $sha, 'new' => $local === null];
     }
     $cmp = updCompleteness($r);
+    // na komputerze nowsza wersja niż w repozytorium (np. świeżo zainstalowana) — „aktualizacja” byłaby cofnięciem
+    $commitTime = strtotime($r['date']) ?: 0;
+    $ahead = $changed && $commitTime && !array_filter($changed, fn($c) => $c['new'] || filemtime(updAppDir() . '/' . $c['path']) <= $commitTime);
     $out = [
-        'available' => $changed && !$cmp['incomplete'], 'sha' => $r['sha'], 'message' => $r['message'], 'date' => $r['date'], 'url' => $r['url'],
+        'available' => $changed && !$cmp['incomplete'] && !$ahead, 'ahead' => $ahead, 'sha' => $r['sha'], 'message' => $r['message'], 'date' => $r['date'], 'url' => $r['url'],
         'repo' => "{$r['owner']}/{$r['name']}", 'branch' => $r['branch'], 'files' => $changed, 'canApply' => updCanApply(),
         'incomplete' => $cmp['incomplete'], 'flat' => $cmp['flat'], 'missing' => array_slice($cmp['missing'], 0, 5), 'missingCount' => count($cmp['missing']),
     ];
@@ -169,6 +210,7 @@ function updApply(int $uid): array {
     if (!updCanApply()) throw new GhError('Aktualizacje instaluje wersja programu na komputer (CloudCut.exe). Tutaj pliki programu to kod źródłowy.');
     $r = updRemote($uid);
     if (updCompleteness($r)['incomplete']) throw new GhError('Repozytorium z aktualizacjami jest niepełne — nie instaluję, żeby nie zepsuć programu. Wgraj cały folder CloudCut z podfolderami js, server i vendor.');
+    if (!updCheck($uid)['available']) throw new GhError('Nie ma nowszej wersji do zainstalowania — program na komputerze jest aktualny albo nowszy niż w repozytorium.');
     $base = ghApi() . "/repos/{$r['owner']}/{$r['name']}";
     $app = updAppDir();
     // 1) pobranie i sprawdzenie wszystkich zmienionych plików, zanim cokolwiek nadpiszemy
@@ -192,6 +234,7 @@ function updApply(int $uid): array {
         if (is_file($src)) {
             if (!is_dir(dirname("$bk/$rel"))) mkdir(dirname("$bk/$rel"), 0770, true);
             copy($src, "$bk/$rel");
+            touch("$bk/$rel", filemtime($src)); // data pliku zostaje — od niej zależy rozpoznanie nowszej wersji
             $saved[] = ['path' => $rel, 'existed' => true];
         } else {
             $saved[] = ['path' => $rel, 'existed' => false];
@@ -212,6 +255,7 @@ function updApply(int $uid): array {
     }
     updSave(['installed' => ['sha' => $r['sha'], 'at' => time(), 'message' => $r['message'], 'repo' => "{$r['owner']}/{$r['name']}"],
         'lastResult' => null, 'etag' => null]); // pliki na dysku się zmieniły — następne sprawdzenie od nowa
+    updLog(['type' => 'install', 'sha' => $r['sha'], 'message' => $r['message'], 'files' => array_slice(array_keys($incoming), 0, 30), 'count' => count($incoming)]);
     return ['files' => count($incoming), 'sha' => $r['sha']];
 }
 function updRollback(): array {
@@ -222,11 +266,13 @@ function updRollback(): array {
     foreach ($c['backup']['files'] as $f) {
         $rel = (string) $f['path'];
         if (!preg_match(UPD_FILES, $rel)) continue;
-        if ($f['existed']) copy("$bk/$rel", "$app/$rel");
+        if ($f['existed']) { copy("$bk/$rel", "$app/$rel"); touch("$app/$rel", filemtime("$bk/$rel")); }
         elseif (is_file("$app/$rel")) unlink("$app/$rel");
     }
     updRemoveDir($bk);
     updSave(['installed' => $c['backup']['installed'] ?? null, 'backup' => null, 'lastResult' => null, 'etag' => null]);
+    updLog(['type' => 'rollback', 'sha' => $c['installed']['sha'] ?? null, 'message' => $c['installed']['message'] ?? '',
+        'files' => array_slice(array_column($c['backup']['files'], 'path'), 0, 30), 'count' => count($c['backup']['files'])]);
     return ['files' => count($c['backup']['files'])];
 }
 function updRemoveDir(string $dir): void {

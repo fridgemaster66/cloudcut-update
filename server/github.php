@@ -140,7 +140,12 @@ function ghCall(string $method, string $url, ?string $token, $body = null, array
                 return strlen($line);
             },
         ];
-        $fh = null;
+        $fh = $out = null;
+        if (isset($o['saveTo'])) { // pobieranie prosto do pliku (duże filmy nie przechodzą przez pamięć)
+            $out = fopen($o['saveTo'], 'wb');
+            $opt[CURLOPT_RETURNTRANSFER] = false;
+            $opt[CURLOPT_FILE] = $out;
+        }
         if (isset($o['upload'])) {
             $fh = fopen($o['upload'], 'rb');
             $opt[CURLOPT_UPLOAD] = true;
@@ -153,7 +158,8 @@ function ghCall(string $method, string $url, ?string $token, $body = null, array
         if (isset($o['progress'])) {
             $cb = $o['progress'];
             $opt[CURLOPT_NOPROGRESS] = false;
-            $opt[CURLOPT_XFERINFOFUNCTION] = function ($ch, $dt, $dn, $ut, $un) use ($cb) { $cb((int) $un); return 0; };
+            $down = isset($o['saveTo']);
+            $opt[CURLOPT_XFERINFOFUNCTION] = function ($ch, $dt, $dn, $ut, $un) use ($cb, $down) { $cb((int) ($down ? $dn : $un)); return 0; };
         }
         $opt[CURLOPT_HTTPHEADER] = $headers;
         $c = curl_init($url);
@@ -162,6 +168,11 @@ function ghCall(string $method, string $url, ?string $token, $body = null, array
         $code = (int) curl_getinfo($c, CURLINFO_RESPONSE_CODE);
         $err = curl_error($c);
         if ($fh) fclose($fh);
+        if ($out) {
+            fclose($out);
+            if ($raw === true) $raw = '';
+            if ($code >= 300 && is_file($o['saveTo'])) { $raw = (string) file_get_contents($o['saveTo'], false, null, 0, 65536); @unlink($o['saveTo']); }
+        }
         if ($raw === false) {
             if ($try < 3 && !$noWait) { sleep(3 + 4 * $try); continue; }
             throw new GhError('Brak połączenia z GitHubem (' . $err . '). Sprawdź internet i spróbuj ponownie.');
@@ -278,9 +289,10 @@ function ghWriteStatus(int $uid, array $s): void {
     file_put_contents(ghStatusFile($uid), json_encode($s, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
 /* Wysyłka idzie w osobnym procesie, żeby program (jednowątkowy serwer PHP) działał w tym czasie normalnie */
-function ghStartWorker(int $uid, array $ids): void {
-    ghWriteStatus($uid, ['state' => 'running', 'step' => 'Przygotowanie…', 'pct' => 0, 'projects' => $ids, 'started' => time()]);
-    file_put_contents(DATA_DIR . "/github/$uid.job.json", json_encode(['projects' => $ids]));
+/* $job: ['type' => 'push', 'projects' => [id…]] albo ['type' => 'import', 'folder' => 'projekty/…'] */
+function ghStartWorker(int $uid, array $job): void {
+    ghWriteStatus($uid, ['state' => 'running', 'kind' => $job['type'], 'step' => 'Przygotowanie…', 'pct' => 0, 'projects' => $job['projects'] ?? [], 'started' => time()]);
+    file_put_contents(DATA_DIR . "/github/$uid.job.json", json_encode($job));
     $php = PHP_BINARY;
     if (PHP_OS_FAMILY === 'Windows') {
         $win = dirname($php) . DIRECTORY_SEPARATOR . 'php-win.exe'; // bez okna konsoli
@@ -295,8 +307,8 @@ function ghStartWorker(int $uid, array $ids): void {
     $proc = proc_open($cmd, [0 => ['file', $null, 'r'], 1 => ['file', $log, 'w'], 2 => ['file', $log, 'a']], $pipes, dirname(PHP_BINARY), null,
         ['bypass_shell' => true, 'create_process_group' => true]);
     if (!is_resource($proc)) {
-        ghWriteStatus($uid, ['state' => 'error', 'error' => 'Nie udało się uruchomić wysyłki.', 'projects' => $ids]);
-        throw new GhError('Nie udało się uruchomić wysyłki.');
+        ghWriteStatus($uid, ['state' => 'error', 'kind' => $job['type'], 'error' => 'Nie udało się uruchomić zadania w tle.']);
+        throw new GhError('Nie udało się uruchomić zadania w tle.');
     }
     // nie czekamy na koniec — proces pracuje dalej sam i zapisuje postęp w pliku stanu
 }
@@ -578,4 +590,163 @@ function ghPushProjects(int $uid, array $ids, bool $retry = true): array {
     ghMarkPushed($uid, $projects);
     return ['unchanged' => false, 'url' => $url, 'repo' => "$owner/$name", 'repoUrl' => ghWeb() . "/$owner/$name", 'projects' => count($projects),
         'files' => $sentFiles, 'bytes' => $doneBytes, 'skipped' => $skipped];
+}
+
+/* ---------------- Projekty na GitHubie: lista, miniatury, pobieranie ---------------- */
+function ghNewId(string $prefix): string { return $prefix . bin2hex(random_bytes(6)); }
+/* Odczyt repozytorium kopii bez zmieniania go (puste repozytorium = brak projektów) */
+function ghRemoteRead(int $uid): array {
+    $cfg = ghConfig($uid);
+    $token = $cfg['token'] ? openToken($cfg['token']) : null;
+    $repo = parseRepo((string) $cfg['repo']);
+    if (!$repo) throw new GhError('Najpierw połącz CloudCut z GitHubem w Ustawieniach (link do repozytorium i token).');
+    $owner = $repo[0] ?? ($token ? ghLogin($cfg, $token, $uid) : null);
+    if (!$owner) throw new GhError('Podaj w Ustawieniach pełny link do repozytorium albo token GitHub.');
+    $name = $repo[1];
+    $base = ghApi() . "/repos/$owner/$name";
+    $info = ghCall('GET', $base, $token);
+    if ($info['code'] === 404) throw new GhError("Nie widzę repozytorium $owner/$name — sprawdź link i token w Ustawieniach.");
+    if ($info['code'] !== 200) ghFail($info, 'repozytorium');
+    $branch = $cfg['branch'] ?: (string) ($info['json']['default_branch'] ?? 'main');
+    $r = ['owner' => $owner, 'name' => $name, 'base' => $base, 'branch' => $branch, 'token' => $token, 'web' => ghWeb() . "/$owner/$name", 'tree' => []];
+    $ref = ghCall('GET', "$base/git/ref/heads/$branch", $token);
+    if ($ref['code'] === 404 || $ref['code'] === 409) return $r; // puste repozytorium albo brak gałęzi
+    if ($ref['code'] !== 200) ghFail($ref, "gałąź $branch");
+    $c = ghCall('GET', "$base/git/commits/{$ref['json']['object']['sha']}", $token);
+    if ($c['code'] !== 200) ghFail($c, 'ostatni commit');
+    $t = ghCall('GET', "$base/git/trees/{$c['json']['tree']['sha']}?recursive=1", $token);
+    if ($t['code'] !== 200) ghFail($t, 'pliki repozytorium');
+    foreach ($t['json']['tree'] ?? [] as $e) if (($e['type'] ?? '') === 'blob') $r['tree'][$e['path']] = $e['sha'];
+    return $r;
+}
+/* Treść pliku z repozytorium (albo zapis prosto do pliku na dysku) */
+function ghBlob(array $r, string $sha, ?string $saveTo = null, ?callable $progress = null): string {
+    $o = ['headers' => ['Accept: application/vnd.github.raw+json', 'X-GitHub-Api-Version: 2022-11-28']];
+    if ($saveTo) $o['saveTo'] = $saveTo;
+    if ($progress) $o['progress'] = $progress;
+    $res = ghCall('GET', "{$r['base']}/git/blobs/$sha", $r['token'], null, $o);
+    if ($res['code'] !== 200) ghFail($res, 'plik z repozytorium');
+    return $saveTo ? '' : $res['raw'];
+}
+/* Duży plik z Git LFS: w repozytorium leży wskaźnik, a sam plik pobieramy przez API LFS */
+function ghLfsDownload(array $r, string $pointer, string $dest, ?callable $progress = null): void {
+    if (!preg_match('/oid sha256:([a-f0-9]{64})\s+size (\d+)/', $pointer, $pm)) { file_put_contents($dest, $pointer); return; }
+    $lfsHdr = ['Accept: application/vnd.git-lfs+json', 'Content-Type: application/vnd.git-lfs+json'];
+    $b = ghCall('POST', ghWeb() . "/{$r['owner']}/{$r['name']}.git/info/lfs/objects/batch", $r['token'],
+        ['operation' => 'download', 'transfers' => ['basic'], 'hash_algo' => 'sha256', 'objects' => [['oid' => $pm[1], 'size' => (int) $pm[2]]]],
+        ['headers' => $lfsHdr, 'auth' => $r['token'] ? 'basic' : 'none']);
+    if ($b['code'] !== 200) ghFail($b, 'Git LFS — duże pliki');
+    $o = $b['json']['objects'][0] ?? [];
+    if (isset($o['error'])) throw new GhError('Dużego pliku nie ma na GitHubie (Git LFS): ' . ($o['error']['message'] ?? 'błąd'));
+    $dl = $o['actions']['download'] ?? null;
+    if (!$dl) throw new GhError('GitHub nie podał adresu dużego pliku (Git LFS).');
+    $h = ['Accept: */*'];
+    foreach ($dl['header'] ?? [] as $k => $v) $h[] = "$k: $v";
+    $res = ghCall('GET', $dl['href'], null, null, ['headers' => $h, 'auth' => 'none', 'saveTo' => $dest] + ($progress ? ['progress' => $progress] : []));
+    if ($res['code'] >= 300) throw new GhError("Nie udało się pobrać dużego pliku (błąd {$res['code']}).");
+    if (hash_file('sha256', $dest) !== $pm[1]) { @unlink($dest); throw new GhError('Pobrany duży plik jest uszkodzony — spróbuj ponownie.'); }
+}
+function ghListProjects(int $uid): array {
+    $r = ghRemoteRead($uid);
+    $out = ['repo' => "{$r['owner']}/{$r['name']}", 'repoUrl' => $r['web'], 'branch' => $r['branch'], 'projects' => []];
+    $index = [];
+    if (isset($r['tree']['cloudcut.json'])) $index = json_decode(ghBlob($r, $r['tree']['cloudcut.json']), true)['projects'] ?? [];
+    $byFolder = [];
+    foreach ($index as $id => $e) if (is_array($e) && isset($e['folder'])) $byFolder[$e['folder']] = $e + ['id' => $id];
+    $q = db()->prepare('SELECT id, updated FROM projects WHERE user_id = ? AND deleted IS NULL');
+    $q->execute([$uid]);
+    $local = array_column($q->fetchAll(), 'updated', 'id');
+    $cache = [];
+    foreach ($r['tree'] as $path => $sha) {
+        if (str_starts_with($path, 'projekty/')) $cache[$path] = $sha;
+        if (!preg_match('#^(projekty/[^/]+)/projekt\.json$#', $path, $m)) continue;
+        $folder = $m[1];
+        $e = $byFolder[$folder] ?? [];
+        $id = (string) ($e['id'] ?? (preg_match('#-([a-z0-9]{4,48})$#i', $folder, $im) ? $im[1] : ''));
+        $thumb = false;
+        foreach (['jpg', 'png', 'webp'] as $x) if (isset($r['tree']["$folder/miniatura.$x"])) { $thumb = true; break; }
+        $out['projects'][] = [
+            'folder' => $folder, 'id' => $id, 'name' => $e['name'] ?? substr($folder, 9), 'updated' => (int) ($e['updated'] ?? 0),
+            'duration' => (float) ($e['duration'] ?? 0), 'saved' => (int) ($e['saved'] ?? 0), 'thumb' => $thumb,
+            'local' => isset($local[$id]), 'localNewer' => isset($local[$id]) && (int) $local[$id] > (int) ($e['updated'] ?? 0),
+            'url' => "{$r['web']}/tree/{$r['branch']}/$folder",
+        ];
+    }
+    usort($out['projects'], fn($a, $b) => $b['saved'] <=> $a['saved'] ?: strcmp($a['name'], $b['name']));
+    // spis plików na potrzeby miniatur (bez ponownego pytania GitHuba przy każdej)
+    file_put_contents(DATA_DIR . "/github/$uid.tree.json", json_encode(['owner' => $r['owner'], 'name' => $r['name'], 'tree' => $cache]));
+    return $out;
+}
+/* Miniatura projektu z GitHuba — pobrana raz, potem z dysku */
+function ghThumbFile(int $uid, string $folder): ?array {
+    $c = json_decode((string) @file_get_contents(DATA_DIR . "/github/$uid.tree.json"), true);
+    if (!is_array($c)) return null;
+    foreach (['jpg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'] as $x => $type) {
+        $sha = $c['tree']["$folder/miniatura.$x"] ?? null;
+        if (!$sha || !preg_match('/^[a-f0-9]{40}$/', $sha)) continue;
+        $dir = DATA_DIR . '/github/thumbs';
+        if (!is_dir($dir)) mkdir($dir, 0770, true);
+        $file = "$dir/$sha.$x";
+        if (!is_file($file)) {
+            $cfg = ghConfig($uid);
+            $r = ['base' => ghApi() . "/repos/{$c['owner']}/{$c['name']}", 'token' => $cfg['token'] ? openToken($cfg['token']) : null];
+            ghBlob($r, $sha, $file);
+        }
+        return [$file, $type];
+    }
+    return null;
+}
+/* Pobranie projektu z GitHuba na to konto (zadanie w tle). Pliki dostają nowe identyfikatory — nic lokalnego nie zostaje nadpisane. */
+function ghImportProject(int $uid, string $folder): array {
+    if (!preg_match('#^projekty/[A-Za-z0-9._-]+$#', $folder)) throw new GhError('Nieprawidłowy folder projektu.');
+    ghReport(['step' => 'Łączenie z GitHubem…', 'pct' => 1], true);
+    $r = ghRemoteRead($uid);
+    $pjSha = $r['tree']["$folder/projekt.json"] ?? null;
+    if (!$pjSha) throw new GhError('Tego projektu nie ma już na GitHubie — odśwież listę.');
+    $pj = json_decode(ghBlob($r, $pjSha), true);
+    if (!is_array($pj) || ($pj['cloudcut'] ?? 0) !== 1 || !isset($pj['project'])) throw new GhError('To nie jest projekt CloudCut.');
+    $data = json_encode($pj['project'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $files = array_values(array_filter($pj['media'] ?? [], fn($m) => is_array($m) && !empty($m['file']) && !empty($m['id'])));
+    $total = max(1, array_sum(array_map(fn($m) => (int) ($m['size'] ?? 0), $files)));
+    $doneBytes = 0;
+    $mediaIds = $missing = [];
+    $ins = db()->prepare('INSERT INTO media (id, user_id, meta, type, size, has_file, updated) VALUES (?,?,?,?,?,1,?)');
+    foreach ($files as $i => $m) {
+        $sha = $r['tree']["$folder/{$m['file']}"] ?? null;
+        $label = (string) ($m['name'] ?? basename($m['file']));
+        if (!$sha) { $missing[] = $label; continue; }
+        $size = (int) ($m['size'] ?? 0);
+        $prog = function (int $got) use ($label, $i, $files, &$doneBytes, $total, $size) {
+            ghReport(['step' => "Pobieranie: $label (" . ($i + 1) . '/' . count($files) . ')',
+                'pct' => 5 + (int) (90 * min(1, ($doneBytes + min($got, max($size, 1))) / $total)), 'bytes' => $doneBytes + $got, 'total' => $total]);
+        };
+        $prog(0);
+        $newId = ghNewId('m');
+        $dest = filePath('media', $uid, $newId);
+        if (!empty($m['lfs'])) ghLfsDownload($r, ghBlob($r, $sha), $dest, $prog);
+        else ghBlob($r, $sha, $dest, $prog);
+        $doneBytes += $size;
+        $meta = is_array($m['meta'] ?? null) ? $m['meta'] : [];
+        $meta['id'] = $newId;
+        $meta['name'] = $label;
+        $ins->execute([$newId, $uid, json_encode($meta, JSON_UNESCAPED_UNICODE), (string) ($m['type'] ?? ''), filesize($dest), time()]);
+        $data = str_replace('"' . $m['id'] . '"', '"' . $newId . '"', $data);
+        $mediaIds[] = $newId;
+    }
+    ghReport(['step' => 'Zapisywanie projektu…', 'pct' => 97], true);
+    $pid = (string) ($pj['id'] ?? '');
+    $taken = !preg_match(ID_RE, $pid);
+    if (!$taken) { $q = db()->prepare('SELECT 1 FROM projects WHERE id = ?'); $q->execute([$pid]); $taken = (bool) $q->fetchColumn(); }
+    $name = mb_substr((string) ($pj['name'] ?? 'Projekt z GitHuba'), 0, 180);
+    if ($taken) { $pid = ghNewId('p'); $name .= ' (z GitHuba)'; }
+    $thumb = null;
+    foreach (['jpg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'] as $x => $type) {
+        if (!isset($r['tree']["$folder/miniatura.$x"])) continue;
+        $bin = ghBlob($r, $r['tree']["$folder/miniatura.$x"]);
+        if (strlen($bin) < 150_000) $thumb = "data:$type;base64," . base64_encode($bin);
+        break;
+    }
+    db()->prepare('INSERT INTO projects (id, user_id, name, data, media_ids, duration, thumb, updated) VALUES (?,?,?,?,?,?,?,?)')
+        ->execute([$pid, $uid, $name, $data, json_encode($mediaIds), (float) ($pj['duration'] ?? 0), $thumb, (int) round(microtime(true) * 1000)]);
+    return ['id' => $pid, 'name' => $name, 'files' => count($mediaIds), 'bytes' => $doneBytes, 'missing' => $missing, 'copy' => $taken];
 }

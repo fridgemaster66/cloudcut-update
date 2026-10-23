@@ -68,7 +68,7 @@ function hideHome() {
 
 /* ---------- Zakładki po lewej: Projekty, Ustawienia, Konto ---------- */
 let homeView = 'projects';
-const HOME_VIEWS = { projects: 'hpProjects', settings: 'hpSettings', account: 'hpAccount' };
+const HOME_VIEWS = { projects: 'hpProjects', github: 'hpGithub', library: 'hpLibrary', updates: 'hpUpdates', settings: 'hpSettings', account: 'hpAccount' };
 function leaveHomeView() {
   // niezapisane pola GitHuba i aktualizacji zapisują się przy wyjściu z Ustawień
   if (homeView === 'settings') { ghAutoSave(); updAutoSave(); }
@@ -92,6 +92,9 @@ function homeNav(view, focusTab = false) {
     updFill();
   }
   if (view === 'account') renderAccount();
+  if (view === 'github') ghpLoad();
+  if (view === 'library') renderLibrary();
+  if (view === 'updates') updpLoad();
 }
 $('.hn-tabs').addEventListener('click', e => { const b = e.target.closest('[data-hnav]'); if (b) homeNav(b.dataset.hnav); });
 $('.hn-tabs').addEventListener('keydown', e => {
@@ -106,6 +109,7 @@ $('#homeSetReset').addEventListener('click', () => $('#setReset').click());
 /* ---------- Konto ---------- */
 async function renderAccount() {
   const cloud = Store.mode === 'cloud';
+  renderAvatarGrid();
   for (const id of ['#accCard', '#accPassBox', '#accMore']) $(id).hidden = !cloud;
   $('#accLocal').hidden = cloud;
   if (!cloud) return;

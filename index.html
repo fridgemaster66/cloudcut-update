@@ -449,10 +449,6 @@
         <p class="hint" id="updState"></p>
       </form>
     </section>
-    <section aria-labelledby="avTitle">
-      <h3 class="set-h" id="avTitle">Kolor avatara</h3>
-      <div class="av-grid" id="avatarGrid" role="radiogroup" aria-labelledby="avTitle"></div>
-    </section>
     <section>
       <h3 class="set-h">Układ okna</h3>
       <div class="layout-grid" id="layoutGrid" role="radiogroup" aria-label="Szablon układu"></div>
@@ -486,6 +482,12 @@
     <div class="hn-tabs" role="tablist" aria-orientation="vertical" aria-label="Działy">
       <button type="button" role="tab" id="hnProjects" data-hnav="projects" aria-controls="hpProjects" aria-selected="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/></svg>Projekty</button>
+      <button type="button" role="tab" id="hnGithub" data-hnav="github" aria-controls="hpGithub" aria-selected="false" tabindex="-1">
+        <svg class="gh-mark" aria-hidden="true"><use href="#ghMark"/></svg>Projekty (GitHub)</button>
+      <button type="button" role="tab" id="hnLibrary" data-hnav="library" aria-controls="hpLibrary" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v16H4zM10 4h4v16h-4z"/><path d="m16.5 4.8 3.8-1 3.7 15.5-3.8 1z" transform="translate(-2 .5)"/></svg>Biblioteka</button>
+      <button type="button" role="tab" id="hnUpdates" data-hnav="updates" aria-controls="hpUpdates" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>Aktualizacje<span class="hn-dot" id="hnUpdatesDot" hidden title="Dostępna aktualizacja"></span></button>
       <button type="button" role="tab" id="hnSettings" data-hnav="settings" aria-controls="hpSettings" aria-selected="false" tabindex="-1">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Ustawienia</button>
       <button type="button" role="tab" id="hnAccount" data-hnav="account" aria-controls="hpAccount" aria-selected="false" tabindex="-1">
@@ -554,6 +556,58 @@
     </section>
   </main>
 
+  <main class="home-main" id="hpGithub" role="tabpanel" aria-labelledby="hnGithub" hidden>
+    <div class="hp-head">
+      <div>
+        <h1 class="hp-title"><svg class="gh-mark" aria-hidden="true"><use href="#ghMark"/></svg> Projekty na GitHubie</h1>
+        <p class="home-sub" id="ghpSub">Projekty zapisane przyciskiem „Zapisz na GitHub”. Możesz je pobrać z powrotem do CloudCut — także na innym komputerze.</p>
+      </div>
+      <button type="button" class="btn small" id="ghpRefresh">Odśwież</button>
+    </div>
+    <p class="gh-line" id="ghpLine" role="status"></p>
+    <div class="home-grid" id="ghpList" aria-live="polite"></div>
+  </main>
+
+  <main class="home-main" id="hpLibrary" role="tabpanel" aria-labelledby="hnLibrary" hidden>
+    <div class="hp-head">
+      <div>
+        <h1>Biblioteka</h1>
+        <p class="home-sub">Twoje rzeczy do wszystkich projektów: czcionki, zdjęcia, filmy, muzyka i LUT-y (.cube). W edytorze są w zakładce Assety → Moje, a czcionki w wyborze czcionek („Moje czcionki”).</p>
+      </div>
+      <button type="button" class="btn primary small" id="libAdd">+ Dodaj pliki</button>
+      <input type="file" id="libInput" multiple accept=".ttf,.otf,.woff,.woff2,.cube,image/*,video/*,audio/*" hidden>
+    </div>
+    <button type="button" class="lib-drop" id="libDrop">Przeciągnij tu pliki albo kliknij: czcionki (.ttf, .otf, .woff, .woff2), zdjęcia, filmy, muzykę i LUT-y (.cube)</button>
+    <div class="home-list-head">
+      <div class="seg lib-cats" id="libCats" role="group" aria-label="Rodzaj"></div>
+      <div class="home-tools"><label class="sr-only" for="libSearch">Szukaj w bibliotece</label><input type="search" id="libSearch" placeholder="Szukaj w bibliotece…"></div>
+    </div>
+    <p class="gh-line" id="libLine" role="status" hidden></p>
+    <div class="lib-grid" id="libList" aria-live="polite"></div>
+  </main>
+
+  <main class="home-main hp-narrow" id="hpUpdates" role="tabpanel" aria-labelledby="hnUpdates" hidden>
+    <div class="hp-head">
+      <div>
+        <h1>Aktualizacje</h1>
+        <p class="home-sub" id="updpSub">Ostatnie zmiany programu i to, co zainstalowano na tym komputerze.</p>
+      </div>
+      <div class="gh-actions">
+        <button type="button" class="btn small primary" id="updpCheck">Sprawdź teraz</button>
+        <button type="button" class="btn small" id="updpSettings">Ustawienia aktualizacji</button>
+      </div>
+    </div>
+    <section class="upd-status" id="updpStatus" role="status" aria-live="polite"></section>
+    <section aria-labelledby="updpRepoTitle">
+      <h2 class="home-h" id="updpRepoTitle">Ostatnie zmiany w repozytorium</h2>
+      <ol class="upd-timeline" id="updpCommits"></ol>
+    </section>
+    <section aria-labelledby="updpLogTitle">
+      <h2 class="home-h" id="updpLogTitle">Na tym komputerze</h2>
+      <ol class="upd-timeline" id="updpLog"></ol>
+    </section>
+  </main>
+
   <main class="home-main hp-narrow" id="hpSettings" role="tabpanel" aria-labelledby="hnSettings" hidden>
     <div class="hp-head"><h1>Ustawienia</h1><button type="button" class="btn small" id="homeSetReset">Przywróć domyślny układ</button></div>
     <!-- tu na czas zakładki trafia treść okna Ustawień (#setBody) — jedna kopia dla menu i edytora -->
@@ -565,6 +619,10 @@
     <section class="acc-card" id="accCard">
       <span class="avatar big" id="accCardAvatar" aria-hidden="true">?</span>
       <div class="acc-id"><strong id="accEmail"></strong><span id="accStats"></span></div>
+    </section>
+    <section class="set-gh" aria-labelledby="avTitle">
+      <h3 class="set-h" id="avTitle">Kolor avatara</h3>
+      <div class="av-grid" id="avatarGrid" role="radiogroup" aria-labelledby="avTitle"></div>
     </section>
     <section class="set-gh" id="accPassBox" aria-labelledby="accPassTitle">
       <h3 class="set-h" id="accPassTitle">Zmiana hasła</h3>
@@ -639,6 +697,7 @@
 <script src="js/home.js"></script>
 <script src="js/github.js"></script>
 <script src="js/updates.js"></script>
+<script src="js/library.js"></script>
 <script src="js/keys.js"></script>
 </body>
 </html>

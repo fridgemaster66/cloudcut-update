@@ -78,7 +78,7 @@ function assetCatalog() {
 }
 function assetLaneKind(id) {
   if (id.startsWith('sfx:')) return 'audio';
-  if (id.startsWith('my:')) { const a = userAssets.find(x => 'my:' + x.id === id); return a?.kind === 'text-style' || a?.data?.clip?.kind === 'text' ? 'text' : a?.kind === 'media' && a.data?.kind === 'audio' ? 'audio' : 'video'; }
+  if (id.startsWith('my:')) { const a = userAssets.find(x => 'my:' + x.id === id); return a?.kind === 'font' || a?.kind === 'text-style' || a?.data?.clip?.kind === 'text' ? 'text' : a?.kind === 'media' && a.data?.kind === 'audio' ? 'audio' : 'video'; }
   return 'video';
 }
 
@@ -329,9 +329,12 @@ let userAssets = [];
 async function loadUserAssets() {
   try { userAssets = (await Store.listAssets()) || []; } catch { userAssets = []; }
   for (const k of [...lutCache.keys()]) if (k.startsWith('u:')) lutCache.delete(k); // zaimportowane LUT-y wczytają się na nowo
+  registerUserFonts(); // czcionki z Biblioteki → wybór czcionek we wszystkich projektach
   renderAssets();
+  if (isHomeOpen() && homeView === 'library') renderLibrary();
 }
 function myAssetPreview(a) {
+  if (a.kind === 'font') return `<div class="ap-text" style="font-family:'${esc(a.data?.family || a.name)}',sans-serif">Aa Ąą</div>`;
   if (a.kind === 'lut') return '<div class="ap-lut" style="background:linear-gradient(135deg,#222,#6b95ff,#ffd34d)"></div>';
   if (a.kind === 'look') return '<div class="ap-lut" style="background:linear-gradient(135deg,#3a2a1a,#d9a05b)"></div>';
   if (a.kind === 'media' && a.data?.thumb) return `<div style="position:absolute;inset:0;background:center/cover url('${a.data.thumb}')"></div>`;
@@ -368,6 +371,17 @@ async function saveMediaAsAsset(m, name = m.name) {
 async function useMyAsset(a, t, trackId) {
   if (!a) return;
   if (a.kind === 'lut') { applyLut('u:' + a.id); return; }
+  if (a.kind === 'font') {
+    // czcionka z Biblioteki: zaznaczonym napisom, a bez zaznaczenia — nowy napis tą czcionką
+    const family = a.data?.family || a.name;
+    await ensureFont(family);
+    const texts = selectedClips().filter(c => c.kind === 'text');
+    if (texts.length) for (const c of texts) c.props.font = family;
+    else addTextClip(null, t, trackId).props.font = family;
+    commit(); renderAll();
+    toast(texts.length ? `Czcionka „${a.name}” na ${plural(texts.length, 'napisie', 'napisach', 'napisach')}` : `Dodano napis z czcionką „${a.name}”`);
+    return;
+  }
   if (a.kind === 'look') {
     const targets = selectedClips().filter(c => c.props.fx);
     if (!targets.length) { toast('Zaznacz klipy, na które nałożyć ten zestaw kolorów'); return; }
