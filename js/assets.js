@@ -340,7 +340,10 @@ function myAssetPreview(a) {
   if (a.kind === 'media' && a.data?.thumb) return `<div style="position:absolute;inset:0;background:center/cover url('${a.data.thumb}')"></div>`;
   if (a.kind === 'media' && a.data?.wave) return `<div style="position:absolute;inset:0;background:#0f2a20 center/100% 70% no-repeat url('${a.data.wave}')"></div>`;
   const c = a.data?.clip;
-  if (c?.kind === 'text') return `<div class="ap-text" style="font-family:'${esc(c.props.font)}',sans-serif;color:${c.props.color};font-weight:${c.props.weight}">${esc(String(c.props.text).split('\n')[0]).slice(0, 18)}</div>`;
+  if (c?.kind === 'text') {
+    const fill = hasTextGrad(c.props) ? `background:${gradCss(c.props)};-webkit-background-clip:text;background-clip:text;color:transparent` : `color:${c.props.color}`;
+    return `<div class="ap-text" style="font-family:'${esc(c.props.font)}',sans-serif;${fill};font-weight:${c.props.weight}">${esc(String(c.props.text).split('\n')[0]).slice(0, 18)}</div>`;
+  }
   return `<div class="ap-sfx"><svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg></div>`;
 }
 async function saveClipAsAsset(c) {

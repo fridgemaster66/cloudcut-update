@@ -373,6 +373,30 @@ function textLayout(P) {
   return { font, lines, lh, pad, padY, total: lines.reduce((a, l) => a + l.length, 0), w: bw + pad * 2, h: lines.length * lh + padY * 2 };
 }
 
+/* Wypełnienie napisu: jeden kolor albo gradient z dowolną liczbą kolorów.
+   Kąt jak w CSS i w planszach (colorFill): 90° = od lewej do prawej, 180° = z góry na dół. */
+const gradStopsOf = P => (P.gradStops || []).filter(s => s && /^#[0-9a-f]{6}$/i.test(s.c)).sort((a, b) => a.p - b.p);
+const hasTextGrad = P => (P.fillType === 'linear' || P.fillType === 'radial') && gradStopsOf(P).length >= 2;
+function textFill(P, R) {
+  if (!hasTextGrad(P)) return P.color;
+  const cx = R.x + R.w / 2, cy = R.y + R.h / 2;
+  let g;
+  if (P.fillType === 'radial') g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, Math.hypot(R.w, R.h) / 2));
+  else {
+    const a = (P.gradAngle ?? 90) * Math.PI / 180;
+    const len = Math.max(1, Math.abs(R.w * Math.sin(a)) / 2 + Math.abs(R.h * Math.cos(a)) / 2);
+    const dx = Math.sin(a) * len, dy = -Math.cos(a) * len;
+    g = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+  }
+  for (const s of gradStopsOf(P)) g.addColorStop(clamp(s.p / 100, 0, 1), s.c);
+  return g;
+}
+/* To samo wypełnienie jako CSS — do podglądu w panelu i miniatur assetów */
+function gradCss(P) {
+  const stops = gradStopsOf(P).map(s => `${s.c} ${clamp(s.p, 0, 100)}%`).join(', ');
+  return P.fillType === 'radial' ? `radial-gradient(circle, ${stops})` : `linear-gradient(${P.gradAngle ?? 90}deg, ${stops})`;
+}
+
 function drawTextContent(P, L, R, typeP, sc) {
   if (P.bg) {
     ctx.save();
@@ -390,13 +414,16 @@ function drawTextContent(P, L, R, typeP, sc) {
   const ax = P.align === 'left' ? R.x + L.pad : P.align === 'right' ? R.x + R.w - L.pad : R.x + R.w / 2;
   let remaining = typeP < 1 ? Math.floor(L.total * typeP) : Infinity;
   const k = renderScale * sc;
+  // gradient rozciąga się na cały blok tekstu (bez marginesu tła), więc wszystkie linijki tworzą jedną całość
+  const fill = textFill(P, { x: R.x + L.pad, y: R.y + L.padY, w: R.w - L.pad * 2, h: R.h - L.padY * 2 });
+  const glowColor = hasTextGrad(P) ? gradStopsOf(P)[0].c : P.color;
   L.lines.forEach((line, i) => {
     let s = line;
     if (remaining !== Infinity) { s = line.slice(0, Math.max(0, remaining)); remaining -= line.length; }
     if (!s) return;
     const y = R.y + L.padY + L.lh * (i + 0.5);
     ctx.save();
-    if (P.glow) { ctx.shadowColor = P.color; ctx.shadowBlur = P.size * 0.45 * k; }
+    if (P.glow) { ctx.shadowColor = glowColor; ctx.shadowBlur = P.size * 0.45 * k; }
     else if (P.shadow) { ctx.shadowColor = 'rgba(0,0,0,.65)'; ctx.shadowBlur = P.size * 0.14 * k; ctx.shadowOffsetY = P.size * 0.035 * k; }
     if (P.stroke > 0) {
       ctx.lineWidth = P.stroke * 2;
@@ -405,7 +432,7 @@ function drawTextContent(P, L, R, typeP, sc) {
       ctx.strokeText(s, ax, y);
       ctx.shadowColor = 'transparent';
     }
-    ctx.fillStyle = P.color;
+    ctx.fillStyle = fill;
     ctx.fillText(s, ax, y);
     if (P.glow) ctx.fillText(s, ax, y);
     ctx.restore();

@@ -370,6 +370,55 @@ const ctlCheck = (c, path, label) => `<label class="check"><input type="checkbox
 const ctlColor = (c, path, label) => `<div class="field"><label for="${fid(path)}">${label}</label><input type="color" id="${fid(path)}" data-path="${path}" value="${getPath(c.props, path)}"></div>`;
 const ctlSelect = (c, path, label, list) => `<div class="field"><label for="${fid(path)}">${label}</label><select id="${fid(path)}" data-path="${path}">${opts(list, getPath(c.props, path))}</select></div>`;
 
+/* Gradient napisu: dowolnie wiele kolorów (przycisk „+”), każdy z położeniem 0–100% */
+const GRAD_MAX = 16;
+const GRAD_PRESETS = [
+  ['Zachód', [['#ff7a59', 0], ['#ff3d77', 100]]],
+  ['Ocean', [['#12c2e9', 0], ['#2563eb', 100]]],
+  ['Złoto', [['#fff3b0', 0], ['#f5b700', 50], ['#b36b00', 100]]],
+  ['Neon', [['#00f5d4', 0], ['#9b5de5', 50], ['#f15bb5', 100]]],
+  ['Ogień', [['#fff200', 0], ['#ff7b00', 50], ['#d00000', 100]]],
+  ['Chrom', [['#ffffff', 0], ['#9aa5b4', 45], ['#ffffff', 55], ['#5b6472', 100]]],
+  ['Tęcza', [['#ff3b3b', 0], ['#ff9f1c', 20], ['#ffe066', 40], ['#2ec4b6', 60], ['#3a86ff', 80], ['#8338ec', 100]]],
+];
+function gradEditor(c) {
+  const P = c.props, stops = P.gradStops;
+  return `<div class="grad-prev" id="gradPrev" style="background:${gradCss(P)}" aria-hidden="true"></div>
+    ${P.fillType === 'linear' ? ctlRange(c, 'gradAngle', 'Kąt gradientu', 0, 360, 1, 'deg') : ''}
+    <div class="grad-stops" role="group" aria-label="Kolory gradientu">${stops.map((s, i) => `<div class="grad-stop">
+        <input type="color" id="gs-c-${i}" data-path="gradStops.${i}.c" value="${s.c}" aria-label="Kolor ${i + 1}" title="Kolor ${i + 1}">
+        <input type="range" id="gs-p-${i}" data-path="gradStops.${i}.p" min="0" max="100" step="1" value="${s.p}" aria-label="Położenie koloru ${i + 1}">
+        <output id="o-gs-p-${i}" data-fmt="pc">${Math.round(s.p)}%</output>
+        <button type="button" class="icon-btn" data-act="gstop-del" data-i="${i}" aria-label="Usuń kolor ${i + 1}" title="Usuń kolor"${stops.length <= 2 ? ' disabled' : ''}>${ICON.x}</button>
+      </div>`).join('')}</div>
+    <div class="grad-tools">
+      <button type="button" class="btn small" data-act="gstop-add"${stops.length >= GRAD_MAX ? ' disabled' : ''} title="Dodaj kolejny kolor w największej przerwie">+ Dodaj kolor</button>
+      <button type="button" class="btn small" data-act="gstop-rev" title="Odwróć kolejność kolorów">⇄ Odwróć</button>
+    </div>
+    <div class="chips grad-presets">${GRAD_PRESETS.map(([n, s], i) => `<button type="button" class="chip grad-chip" data-gpreset="${i}" title="Gotowy gradient: ${n}"><span style="background:linear-gradient(90deg, ${s.map(([cc, pp]) => `${cc} ${pp}%`).join(', ')})"></span>${n}</button>`).join('')}</div>`;
+}
+/* kolor pośrodku między dwoma (#rrggbb) — dla nowego koloru w gradiencie */
+function mixHex(a, b, t = 0.5) {
+  const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
+  return '#' + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+function gradAction(c, act, i) {
+  const P = c.props;
+  let s = P.gradStops.map(x => ({ ...x })).sort((a, b) => a.p - b.p);
+  if (act === 'gstop-add' && s.length < GRAD_MAX) {
+    // nowy kolor w największej przerwie, w połowie drogi między sąsiadami
+    let gi = 0;
+    for (let k = 1; k < s.length - 1; k++) if (s[k + 1].p - s[k].p > s[gi + 1].p - s[gi].p) gi = k;
+    s.splice(gi + 1, 0, { c: mixHex(s[gi].c, s[gi + 1].c), p: Math.round((s[gi].p + s[gi + 1].p) / 2) });
+  } else if (act === 'gstop-del' && P.gradStops.length > 2) {
+    s = P.gradStops.filter((_, k) => k !== i).map(x => ({ ...x }));
+  } else if (act === 'gstop-rev') {
+    s = s.reverse().map(x => ({ c: x.c, p: 100 - x.p }));
+  } else return false;
+  P.gradStops = s;
+  return true;
+}
+
 function renderInspector() {
   for (const id of [...sel]) if (!clipById(id)) sel.delete(id); // zaznaczenie mogło wskazywać usunięty klip
   const box = $('#inspector');
@@ -437,7 +486,8 @@ function clipInspector(c) {
         ${ctlSelect(c, 'weight', 'Grubość', fontWeights(P.font).map(w => [w, `${WEIGHT_NAMES[w] || w} (${w})`]))}
       </div>
       ${ctlRange(c, 'size', 'Rozmiar', 12, 500, 1, 'px')}
-      <div class="row2">${ctlColor(c, 'color', 'Kolor')}${ctlSelect(c, 'align', 'Wyrównanie', [['left', 'Do lewej'], ['center', 'Do środka'], ['right', 'Do prawej']])}</div>
+      <div class="row2">${ctlSelect(c, 'fillType', 'Wypełnienie', [['solid', 'Jeden kolor'], ['linear', 'Gradient liniowy'], ['radial', 'Gradient kołowy']])}${ctlSelect(c, 'align', 'Wyrównanie', [['left', 'Do lewej'], ['center', 'Do środka'], ['right', 'Do prawej']])}</div>
+      ${P.fillType === 'linear' || P.fillType === 'radial' ? gradEditor(c) : ctlColor(c, 'color', 'Kolor')}
       ${ctlRange(c, 'spacing', 'Odstęp liter', -10, 60, 1, 'px')}
       ${ctlRange(c, 'lineHeight', 'Interlinia', 0.8, 2.5, 0.05, 'n')}
       <div class="row2">${ctlCheck(c, 'italic', 'Kursywa')}${ctlCheck(c, 'upper', 'WERSALIKI')}</div>
@@ -628,6 +678,7 @@ inspEl.addEventListener('input', e => {
     const t = lanesEl.querySelector(`[data-clip="${c.id}"] .clip-name`);
     if (t) t.lastChild.textContent = clipLabel(c);
   }
+  if (el.dataset.path.startsWith('grad') && $('#gradPrev')) $('#gradPrev').style.background = gradCss(c.props);
   syncMedia();
   drawFrame();
 });
@@ -714,8 +765,21 @@ inspEl.addEventListener('click', async e => {
     commit(); renderInspector(); drawFrame();
     return;
   }
+  const gpreset = e.target.closest('[data-gpreset]');
+  if (gpreset && c) {
+    c.props.gradStops = GRAD_PRESETS[+gpreset.dataset.gpreset][1].map(([cc, pp]) => ({ c: cc, p: pp }));
+    if (c.props.fillType === 'solid') c.props.fillType = 'linear';
+    commit(); renderInspector(); drawFrame();
+    $(`[data-gpreset="${gpreset.dataset.gpreset}"]`)?.focus();
+    return;
+  }
   if (!actBtn) return;
   const act = actBtn.dataset.act;
+  if (act.startsWith('gstop-') && c) {
+    if (gradAction(c, act, +actBtn.dataset.i)) { commit(); renderInspector(); drawFrame(); }
+    (act === 'gstop-add' || act === 'gstop-rev' ? $(`[data-act="${act}"]`) : $('[data-act="gstop-add"]'))?.focus();
+    return;
+  }
   if (act === 'del') deleteSelected(false);
   else if (act === 'dup') duplicateSelected();
   else if (act === 'copy') copySelected();

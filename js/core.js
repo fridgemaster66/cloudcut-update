@@ -162,6 +162,8 @@ function defaultProps(kind) {
     text: 'Twój tytuł', font: 'Inter', size: 110, weight: 700, italic: false, upper: false, color: '#ffffff', align: 'center',
     spacing: 0, lineHeight: 1.15, stroke: 0, strokeColor: '#000000', bg: false, bgColor: '#000000', bgOpacity: 0.6,
     shadow: true, glow: false, y: Math.round(state.h * 0.28), fadeIn: 0.4, fadeOut: 0.4,
+    // wypełnienie: jeden kolor albo gradient z dowolną liczbą kolorów (c = kolor, p = położenie 0–100%)
+    fillType: 'solid', gradAngle: 90, gradStops: [{ c: '#ff6b8b', p: 0 }, { c: '#ffd34d', p: 100 }],
   });
   if (kind === 'color') Object.assign(p, { c1: '#1b2a6b', c2: '#c0396b', grad: 'linear', angle: 135 });
   if (kind === 'shape') Object.assign(p, { shape: 'roundrect', w: 520, h: 300, fill: '#6b95ff', fillOn: true, stroke: '#ffffff', strokeW: 0, corner: 28, points: 5 });
