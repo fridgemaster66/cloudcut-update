@@ -95,20 +95,12 @@ function placeMedia(m, { t = playhead, trackId = null, srcIn = 0, srcDur = null,
   if (!tr || tr.kind !== need || tr.locked) tr = defaultTrack(need);
   t = Math.max(0, t);
   const dur = Math.max(frame(), srcDur ?? (kind === 'image' ? 5 : m.duration - srcIn));
-  const withAudio = kind === 'video' && m.hasAudio;
-  const aTr = withAudio ? defaultTrack('audio') : null;
   if (mode === 'insert') rippleInsert(t, dur);
-  else { clearRange(tr.id, t, t + dur); if (aTr) clearRange(aTr.id, t, t + dur); }
+  else clearRange(tr.id, t, t + dur);
+  // film trafia na oś razem ze swoim dźwiękiem w jednym klipie — osobny klip audio daje dopiero „Rozdziel”
   const v = newClip(kind, tr.id, t, dur, { mediaId: m.id, in: srcIn, name: m.name });
   state.clips.push(v);
   const out = [v];
-  if (withAudio) {
-    const a = newClip('audio', aTr.id, t, dur, { mediaId: m.id, in: srcIn, name: m.name });
-    v.group = a.group = uid('g');
-    v.props.detached = true;
-    state.clips.push(a);
-    out.push(a);
-  }
   sel = new Set(out.map(c => c.id));
   gcPlayers();
   commit(); renderAll(); renderBin();
@@ -222,32 +214,63 @@ function toggleLink() {
   commit(); renderLanes();
 }
 
-function detachAudio(c) {
+/* Wydzielenie dźwięku filmu na osobny klip; linked = para dalej przesuwa się i tnie razem */
+function detachAudio(c, { linked = true, quiet = false } = {}) {
   const m = media.get(c.mediaId);
-  if (!m?.hasAudio) { toast('Ten plik nie ma ścieżki dźwiękowej'); return; }
+  if (!m?.hasAudio) { if (!quiet) toast('Ten plik nie ma ścieżki dźwiękowej'); return null; }
   let tr = state.tracks.find(t => t.kind === 'audio' && !t.locked && !overlaps(t.id, c.start, clipEnd(c)));
   if (!tr) tr = addTrack('audio', false);
   const a = newClip('audio', tr.id, c.start, c.dur, { mediaId: c.mediaId, in: c.in, speed: c.speed, name: c.name });
   a.props.volume = c.props.volume;
+  a.props.fadeIn = c.props.fadeIn; // dźwięk filmu narastał i wygasał razem z obrazem
+  a.props.fadeOut = c.props.fadeOut;
+  if (c.props.afx) a.props.afx = structuredClone(c.props.afx);
   if (c.kf?.volume) a.kf.volume = structuredClone(c.kf.volume);
   c.props.detached = true;
-  c.group ||= uid('g');
-  a.group = c.group;
+  if (linked) { c.group ||= uid('g'); a.group = c.group; }
   state.clips.push(a);
+  if (!quiet) { commit(); renderAll(); toast('Dźwięk przeniesiony na ścieżkę ' + tr.name); }
+  return a;
+}
+/* „Rozdziel”: obraz i dźwięk zaznaczonych filmów stają się osobnymi klipami, które można edytować niezależnie */
+function splitAV() {
+  const vids = selectedClips().filter(c => c.kind === 'video' && !isLocked(c));
+  if (!vids.length) { toast('Zaznacz klip wideo, którego obraz i dźwięk chcesz rozdzielić'); return; }
+  let n = 0;
+  for (const c of vids) {
+    if (c.props.detached) {
+      // dźwięk jest już osobno, ale para była połączona — rozłączamy ją
+      const pair = groupMembers(c);
+      if (pair.length > 1) { for (const x of pair) x.group = null; n++; }
+      continue;
+    }
+    const a = detachAudio(c, { linked: false, quiet: true });
+    if (a) { if (c.group && groupMembers(c).length === 1) c.group = null; sel.add(a.id); n++; }
+  }
+  if (!n) { toast(vids.some(c => !media.get(c.mediaId)?.hasAudio) ? 'Ten film nie ma dźwięku — nie ma czego rozdzielać' : 'Obraz i dźwięk są już rozdzielone'); return; }
   commit(); renderAll();
-  toast('Dźwięk przeniesiony na ścieżkę ' + tr.name);
+  toast(n === 1 ? 'Rozdzielono — obraz i dźwięk to teraz osobne klipy' : `Rozdzielono ${n} klipy — obraz i dźwięk osobno`);
 }
 
-function setSpeed(c, s) {
-  for (const x of groupMembers(c)) {
+/* Zmiana prędkości, także na ujemną (wstecz). Klip zachowuje ten sam fragment pliku, a jego początek zostaje w miejscu.
+   base: klipy sprzed przeciągania suwaka — ruch tam i z powrotem nie skraca wtedy klipu na stałe */
+function setSpeed(c, s, base = null) {
+  s = (s < 0 ? -1 : 1) * clamp(Math.abs(s) || 1, SPEED_MIN, SPEED_MAX);
+  const members = groupMembers(c);
+  for (const x of members) {
     if (!isAV(x)) continue;
-    let nd = x.dur * x.speed / s;
-    const next = clipsOn(x.trackId).find(o => o.id !== x.id && o.start >= clipEnd(x) - EPS && !groupMembers(c).includes(o));
-    if (next) nd = Math.min(nd, next.start - x.start);
+    const o = base?.get(x.id) || x;
+    const span = o.dur * Math.abs(o.speed), lo = o.speed > 0 ? o.in : o.in - span; // fragment pliku [lo, lo + span]
+    const nin = s > 0 ? lo : lo + span;
+    let nd = span / Math.abs(s);
+    const next = clipsOn(x.trackId).find(y => y.id !== x.id && y.start >= o.start + o.dur - EPS && !members.includes(y));
+    if (next) nd = Math.min(nd, next.start - o.start);
     const m = media.get(x.mediaId);
-    if (m) nd = Math.min(nd, (m.duration - x.in) / s);
-    scaleKf(x, x.speed / s);
+    if (m) nd = Math.min(nd, s > 0 ? (m.duration - nin) / s : nin / -s);
+    x.kf = structuredClone(o.kf || {});
+    scaleKf(x, Math.abs(o.speed / s));
     x.dur = Math.max(frame(), nd);
+    x.in = nin;
     x.speed = s;
   }
 }
@@ -389,14 +412,18 @@ function clipStyle(c) {
   const m = media.get(c.mediaId);
   let s = `left:${c.start * pps}px;width:${Math.max(3, c.dur * pps)}px;`;
   if ((c.kind === 'video' || c.kind === 'image') && m?.thumb) s += `background-image:url('${m.thumb}');`;
-  else if (c.kind === 'audio' && m?.wave) {
-    const W = m.duration * pps / c.speed;
-    s += `background-image:url('${m.wave}');background-size:${W}px 64%;background-position:${-c.in * pps / c.speed}px 75%;`;
-  } else if (c.kind === 'color') {
+  else if (c.kind === 'color') {
     const P = c.props;
     s += `background-image:${P.grad === 'solid' ? `linear-gradient(${P.c1},${P.c1})` : `linear-gradient(90deg,${P.c1},${P.c2})`};`;
   }
   return s;
+}
+/* Fala dźwięku na klipie: audio i film z własnym dźwiękiem; przy odtwarzaniu wstecz odbita w poziomie */
+function waveHtml(c) {
+  const m = media.get(c.mediaId);
+  if (!m?.wave || !(c.kind === 'audio' || (c.kind === 'video' && m.hasAudio && !c.props.detached))) return '';
+  const s = Math.abs(c.speed), lo = c.speed > 0 ? c.in : c.in + c.dur * c.speed;
+  return `<span class="cwave${c.speed < 0 ? ' rev' : ''}" aria-hidden="true" style="background-image:url('${m.wave}');background-size:${m.duration * pps / s}px 100%;background-position:${-lo * pps / s}px 50%"></span>`;
 }
 function clipHtml(c) {
   const P = c.props;
@@ -407,11 +434,11 @@ function clipHtml(c) {
   const kfs = kfTimes(c).map(t => `<span class="kfd" style="left:${t * pps}px"></span>`).join('');
   const label = clipLabel(c);
   const icon = c.kind === 'text' ? ICON.text : c.group ? ICON.link : '';
-  const spd = c.speed !== 1 ? `<span class="spd">${+c.speed.toFixed(2)}×</span>` : '';
+  const spd = c.speed !== 1 ? `<span class="spd" title="${c.speed < 0 ? 'Odtwarzanie wstecz' : 'Prędkość'}">${c.speed < 0 ? '◀ ' : ''}${fmtSpeed(Math.abs(c.speed))}×</span>` : '';
   const tags = [P.key?.on && 'klucz', P.lut?.id && 'LUT', P.mask?.type && P.mask.type !== 'none' && 'maska', P.afx && Object.values(P.afx).some(Boolean) && 'efekty audio'].filter(Boolean);
   const fx = tags.length ? ' · ' + tags.join(' · ') : '';
   return `<div class="clip k-${c.kind}${sel.has(c.id) ? ' sel' : ''}${c.off ? ' off' : ''}" data-clip="${c.id}" style="${clipStyle(c)}" title="${esc(label)} — ${shortDur(c.dur)}">
-    ${tb}${fi}${fo}${kfs}<div class="h h-l" data-h="l"></div><span class="clip-name">${icon}${spd}${esc(label)}${fx}</span><div class="h h-r" data-h="r"></div></div>`;
+    ${waveHtml(c)}${tb}${fi}${fo}${kfs}<div class="h h-l" data-h="l"></div><span class="clip-name">${icon}${spd}${esc(label)}${fx}</span><div class="h h-r" data-h="r"></div></div>`;
 }
 
 function renderLanes() {
@@ -729,7 +756,8 @@ window.addEventListener('pointermove', e => {
     for (const x of moving) {
       const o = orig.get(x.id), m = media.get(o.mediaId);
       if (!m) continue;
-      x.in = clamp(o.in - dx * o.speed, 0, Math.max(0, m.duration - o.dur * o.speed));
+      const span = o.dur * Math.abs(o.speed), ni = o.in - dx * o.speed; // wstecz: c.in to koniec użytego fragmentu pliku
+      x.in = o.speed > 0 ? clamp(ni, 0, Math.max(0, m.duration - span)) : clamp(ni, Math.min(span, m.duration), m.duration);
     }
     toast(`Początek w pliku: ${tc(c.in)}`, 700);
   } else if (mode === 'roll') {
@@ -740,8 +768,8 @@ window.addEventListener('pointermove', e => {
     for (const [A, B] of drag.pair) {
       const oA = orig.get(A.id), oB = orig.get(B.id), mA = media.get(oA.mediaId);
       lo = Math.max(lo, oA.start + frame()); hi = Math.min(hi, oB.start + oB.dur - frame());
-      if (isAV(oA) && mA) hi = Math.min(hi, oA.start + (mA.duration - oA.in) / oA.speed);
-      if (isAV(oB)) lo = Math.max(lo, oB.start - oB.in / oB.speed);
+      if (isAV(oA) && mA) hi = Math.min(hi, clipEnd(oA) + roomAfter(oA, mA));
+      if (isAV(oB)) lo = Math.max(lo, oB.start - roomBefore(oB, media.get(oB.mediaId)));
     }
     const cut = clamp(sn.t, lo, hi);
     for (const [A, B] of drag.pair) {
@@ -757,8 +785,8 @@ window.addEventListener('pointermove', e => {
     let d = dx, lo = -Infinity, hi = Infinity;
     for (const x of moving) {
       const o = orig.get(x.id), m = media.get(o.mediaId);
-      if (isL) { hi = Math.min(hi, o.dur - frame()); if (isAV(o)) lo = Math.max(lo, -o.in / o.speed); }
-      else { lo = Math.max(lo, frame() - o.dur); if (isAV(o) && m) hi = Math.min(hi, (m.duration - o.in) / o.speed - o.dur); }
+      if (isL) { hi = Math.min(hi, o.dur - frame()); if (isAV(o)) lo = Math.max(lo, -roomBefore(o, m)); }
+      else { lo = Math.max(lo, frame() - o.dur); if (isAV(o) && m) hi = Math.min(hi, roomAfter(o, m)); }
     }
     d = clamp(d, lo, hi);
     for (const x of moving) {
@@ -784,12 +812,12 @@ window.addEventListener('pointermove', e => {
         hi = Math.min(hi, o.dur - frame());
         const prevEnd = Math.max(0, ...others.filter(y => clipEnd(y) <= o.start + EPS).map(clipEnd));
         lo = Math.max(lo, prevEnd - o.start);
-        if (isAV(o)) lo = Math.max(lo, -o.in / o.speed);
+        if (isAV(o)) lo = Math.max(lo, -roomBefore(o, m));
       } else {
         lo = Math.max(lo, frame() - o.dur);
         const next = others.find(y => y.start >= o.start + o.dur - EPS);
         if (next) hi = Math.min(hi, next.start - (o.start + o.dur));
-        if (isAV(o) && m) hi = Math.min(hi, (m.duration - o.in) / o.speed - o.dur);
+        if (isAV(o) && m) hi = Math.min(hi, roomAfter(o, m));
       }
     }
     d = clamp(d, lo, hi);
@@ -804,7 +832,11 @@ window.addEventListener('pointermove', e => {
   showLine('snap-line', hit);
   for (const x of moving) {
     const el = lanesEl.querySelector(`[data-clip="${x.id}"]`);
-    if (el) { el.style.cssText = clipStyle(x); el.classList.add('dragging'); el.querySelector('.strip')?.remove(); }
+    if (el) {
+      el.style.cssText = clipStyle(x); el.classList.add('dragging'); el.querySelector('.strip')?.remove();
+      const w = el.querySelector('.cwave');
+      if (w) w.outerHTML = waveHtml(x);
+    }
   }
   if (!playing) { syncMedia(); drawFrame(); }
 });
@@ -959,12 +991,13 @@ lanesEl.addEventListener('contextmenu', e => {
       { label: c.group ? 'Rozłącz obraz i dźwięk' : 'Połącz zaznaczone', key: keyLabel('link'), disabled: !c.group && n < 2, act: toggleLink },
     ];
     if (c.kind === 'video') {
-      items.push({ label: 'Odłącz dźwięk na osobną ścieżkę', disabled: c.props.detached || !media.get(c.mediaId)?.hasAudio, act: () => detachAudio(c) });
+      items.push({ label: 'Rozdziel obraz i dźwięk', key: keyLabel('detach'), disabled: !media.get(c.mediaId)?.hasAudio || (c.props.detached && groupMembers(c).length < 2), act: splitAV });
       items.push({ label: 'Stopklatka w miejscu głowicy (2 s)', key: keyLabel('freeze'), act: freezeFrame });
     }
     if (isAV(c)) {
       items.push({ label: 'Normalizuj głośność', disabled: !media.get(c.mediaId)?.peak, act: () => normalizeClip(c) });
       for (const s of [0.5, 1, 2]) items.push({ label: `Prędkość ${String(s).replace('.', ',')}×`, disabled: c.speed === s, act: () => { setSpeed(c, s); commit(); renderAll(); } });
+      items.push({ label: c.speed < 0 ? 'Odtwarzaj do przodu' : 'Odtwarzaj wstecz', act: () => { setSpeed(c, -c.speed); commit(); renderAll(); } });
     }
     if (c.mediaId) items.push({ label: 'Pokaż w monitorze źródła', key: keyLabel('matchFrame'), act: () => openSource(c.mediaId) });
     items.push({ label: c.off ? 'Włącz klip' : 'Wyłącz klip', key: keyLabel('toggleOff'), act: toggleClipsOff });

@@ -270,7 +270,7 @@ async function renderFrameAt(t) {
 
 /* Klatki filmów prosto z dekodera (WebCodecs) — bez przewijania odtwarzaczy, więc szybko i co do klatki */
 class FrameFeeder {
-  constructor(mb) { this.mb = mb; this.sinks = new Map(); this.its = new Map(); }
+  constructor(mb) { this.mb = mb; this.sinks = new Map(); this.its = new Map(); this.rev = new Map(); }
   async sinkFor(mediaId) {
     if (this.sinks.has(mediaId)) return this.sinks.get(mediaId);
     let sink = null;
@@ -287,8 +287,10 @@ class FrameFeeder {
     const sink = await this.sinkFor(c.mediaId);
     if (!sink) return null;
     const target = srcTimeOf(c, t);
+    if (c.speed < 0) return this.reverseFrame(c, sink, target);
     let st = this.its.get(c.id);
-    if (!st || (st.cur && target < st.cur.timestamp - 0.002)) {
+    // cofnięcie albo duży skok do przodu (szybkie klipy): dekoder zaczyna od najbliższej klatki kluczowej
+    if (!st || (st.cur && (target < st.cur.timestamp - 0.002 || target > st.cur.timestamp + 4))) {
       st?.it.return?.();
       st = { it: sink.canvases(Math.max(0, target - 0.001)), cur: null, next: null };
       const r = await st.it.next();
@@ -302,6 +304,23 @@ class FrameFeeder {
     }
     if (!st.cur && st.next) st.cur = st.next;
     return st.cur?.canvas || null;
+  }
+  /* Wstecz: dekoder idzie tylko do przodu, więc kawałek pliku przed bieżącym miejscem dekodujemy w całości
+     (ok. 250 MB klatek) i oddajemy klatki od końca */
+  async reverseFrame(c, sink, target) {
+    let b = this.rev.get(c.id);
+    if (!b || target < b.from - 1e-4 || target > b.to + 1e-4) {
+      const m = media.get(c.mediaId);
+      const len = clamp(250e6 / (Math.max(1, (m?.w || 1920) * (m?.h || 1080)) * 4) / 30, 0.1, 1);
+      const from = Math.max(0, target - len), frames = [];
+      this.rev.delete(c.id); // poprzedni kawałek do zwolnienia, zanim zdekodujemy następny
+      for await (const f of sink.canvases(from, target + 0.001)) frames.push(f);
+      b = { from, to: target, frames };
+      this.rev.set(c.id, b);
+    }
+    let best = null;
+    for (const f of b.frames) { if (f.timestamp <= target + 1e-4) best = f; else break; }
+    return (best || b.frames[0])?.canvas || null;
   }
   async prepare(t) {
     const tails = computeTails();
@@ -319,6 +338,7 @@ class FrameFeeder {
   dispose() {
     for (const st of this.its.values()) st.it.return?.();
     this.its.clear();
+    this.rev.clear();
     exportFrames = null;
   }
 }
@@ -468,13 +488,16 @@ async function renderAudioMix(from, to, sr = 48000) {
     const tail = tails.get(c.id) || 0;
     const a = Math.max(c.start, from), b = Math.min(clipEnd(c) + tail, to);
     if (b <= a) continue;
-    const buf = await decodedBuffer(c.mediaId);
+    // wstecz: odwrócona kopia dźwięku, czytana od miejsca odpowiadającego początkowi fragmentu
+    const rev = c.speed < 0, s = Math.abs(c.speed);
+    const buf = rev ? await reversedBufferAsync(c.mediaId) : await decodedBuffer(c.mediaId);
     if (!buf) continue;
-    const offset = c.in + (a - c.start) * c.speed;
+    const pos = c.in + (a - c.start) * c.speed;
+    const offset = Math.max(0, rev ? buf.duration - pos : pos);
     if (offset >= buf.duration) continue;
     const src = oac.createBufferSource();
     src.buffer = buf;
-    src.playbackRate.value = c.speed;
+    src.playbackRate.value = s;
     const g = oac.createGain();
     const gainAt = t => audioGain(c, t, t >= clipEnd(c) ? tail : 0);
     g.gain.setValueAtTime(gainAt(a), a - from);
@@ -482,7 +505,7 @@ async function renderAudioMix(from, to, sr = 48000) {
     const fx = buildAudioFx(oac, c.props.afx);
     src.connect(fx.input);
     fx.output.connect(g).connect(trackIn.get(c.trackId) || lim);
-    src.start(a - from, offset, Math.min((b - a) * c.speed, buf.duration - offset));
+    src.start(a - from, offset, Math.min((b - a) * s, buf.duration - offset));
   }
   return oac.startRendering();
 }

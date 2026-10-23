@@ -118,6 +118,13 @@ const clipsOn = trackId => state.clips.filter(c => c.trackId === trackId).sort((
 const laneKind = kind => (kind === 'audio' ? 'audio' : kind === 'text' ? 'text' : 'video');
 const projectEnd = () => state.clips.reduce((m, c) => Math.max(m, c.start + c.dur), 0);
 const isAV = c => c.kind === 'video' || c.kind === 'audio';
+/* Prędkość klipu od −100× do 100×; ujemna = odtwarzanie wstecz. c.in to zawsze miejsce w pliku na początku klipu,
+   więc materiał w chwili t to c.in + (t − c.start) · c.speed — także przy prędkości ujemnej. */
+const SPEED_MIN = 0.1, SPEED_MAX = 100;
+const fmtSpeed = s => String(+(+s).toFixed(Math.abs(s) < 10 ? 2 : 1)).replace('.', ',');
+/* Zapas materiału (w sekundach osi czasu) przed początkiem i za końcem klipu */
+function roomBefore(c, m) { const D = m?.duration ?? Infinity; return c.speed > 0 ? c.in / c.speed : (D - c.in) / -c.speed; }
+function roomAfter(c, m) { const D = m?.duration ?? Infinity, end = c.in + c.dur * c.speed; return Math.max(0, c.speed > 0 ? (D - end) / c.speed : end / -c.speed); }
 const isVisual = c => c.kind !== 'audio';
 const clipEnd = c => c.start + c.dur;
 const selectedClips = () => state.clips.filter(c => sel.has(c.id));

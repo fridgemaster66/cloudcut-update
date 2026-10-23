@@ -224,10 +224,12 @@ function rmsEnvelope(buf, from, to, hop = 0.02) {
 const audioPartner = c => (c.kind === 'audio' ? c : groupMembers(c).find(x => x.kind === 'audio') || c);
 
 /* ---------------- Usuwanie ciszy ---------------- */
+const REV_NOTE = 'Ta funkcja działa na klipach odtwarzanych do przodu — ustaw dodatnią prędkość';
 async function removeSilence() {
   const base = selectedClips().find(c => isAV(c) && !isLocked(c));
   if (!base) { toast('Zaznacz klip z mową (wideo albo audio), z którego usunąć ciszę'); return; }
   const ac = audioPartner(base);
+  if (ac.speed < 0) { toast(REV_NOTE); return; }
   const buf = await decodedBuffer(ac.mediaId);
   if (!buf) { toast('Nie udało się odczytać dźwięku tego klipu'); return; }
   const hop = 0.02, minSil = 0.45, pad = 0.12;
@@ -289,6 +291,7 @@ async function detectBeats() {
   const base = selectedClips().find(isAV) || state.clips.find(c => c.kind === 'audio');
   if (!base) { toast('Zaznacz klip z muzyką'); return; }
   const ac = audioPartner(base);
+  if (ac.speed < 0) { toast(REV_NOTE); return; }
   const buf = await decodedBuffer(ac.mediaId);
   if (!buf) { toast('Nie udało się odczytać dźwięku'); return; }
   const hop = 0.01, from = ac.in, to = ac.in + ac.dur * ac.speed;
@@ -352,7 +355,9 @@ async function autoDuck() {
     if (b <= a) continue;
     const buf = await decodedBuffer(v.mediaId);
     if (!buf) continue;
-    const env = rmsEnvelope(buf, v.in + (a - v.start) * v.speed, v.in + (b - v.start) * v.speed, hop * v.speed);
+    const p0 = v.in + (a - v.start) * v.speed, p1 = v.in + (b - v.start) * v.speed;
+    let env = rmsEnvelope(buf, Math.min(p0, p1), Math.max(p0, p1), hop * Math.abs(v.speed));
+    if (v.speed < 0) env = env.reverse(); // głos odtwarzany wstecz
     const vol = v.props.volume ?? 1;
     for (let i = 0; i < env.length; i++) if (env[i] * vol > 0.025) act[Math.floor((a - start) / hop) + i] = 1;
   }
@@ -413,6 +418,7 @@ async function loadMediabunny() {
 async function detectScenes() {
   const c = selectedClips().find(x => x.kind === 'video' && !isLocked(x));
   if (!c) { toast('Zaznacz klip wideo, w którym wykryć zmiany ujęć'); return; }
+  if (c.speed < 0) { toast(REV_NOTE); return; }
   const m = media.get(c.mediaId);
   toast('Analizuję obraz…', 2000);
   const step = 1 / 6, from = c.in, to = c.in + c.dur * c.speed;
@@ -462,75 +468,13 @@ async function detectScenes() {
 }
 
 /* ---------------- Odwracanie klipu ---------------- */
-async function reverseClip() {
+/* Od końca = prędkość ujemna: działa od razu, bez tworzenia nowego pliku i bez limitu długości */
+function reverseClip() {
   const c = selectedClips().find(x => isAV(x) && !isLocked(x));
   if (!c) { toast('Zaznacz klip wideo lub audio do odwrócenia'); return; }
-  const m = media.get(c.mediaId);
-  const from = c.in, to = c.in + c.dur * c.speed;
-  if (to - from > 45) { toast('Odwracać można fragmenty do 45 s — przytnij klip'); return; }
-  const prog = progressToast('Odwracanie klipu…');
-  try {
-    const mb = await loadMediabunny();
-    const audio = await decodedBuffer(c.mediaId);
-    let revAudio = null;
-    if (audio) {
-      const sr = audio.sampleRate, a0 = Math.floor(from * sr), a1 = Math.min(audio.length, Math.ceil(to * sr));
-      revAudio = new AudioBuffer({ length: Math.max(1, a1 - a0), numberOfChannels: Math.min(2, audio.numberOfChannels), sampleRate: sr });
-      for (let ch = 0; ch < revAudio.numberOfChannels; ch++) {
-        const src = audio.getChannelData(ch).subarray(a0, a1), dst = revAudio.getChannelData(ch);
-        for (let i = 0; i < src.length; i++) dst[i] = src[src.length - 1 - i];
-      }
-    }
-    const output = new mb.Output({ format: new mb.WebMOutputFormat(), target: new mb.BufferTarget() });
-    let vSrc = null, frames = [], W = 0, H = 0, fps = 30;
-    if (m.kind === 'video' && m.w) {
-      const input = new mb.Input({ source: new mb.BlobSource(m.blob), formats: mb.ALL_FORMATS });
-      const track = await input.getPrimaryVideoTrack();
-      W = Math.round(m.w / 2) * 2; H = Math.round(m.h / 2) * 2;
-      const sink = new mb.CanvasSink(track, { width: W, height: H, fit: 'fill' });
-      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-      const g = cv.getContext('2d');
-      let i = 0;
-      for await (const w of sink.canvases(from, to)) {
-        g.drawImage(w.canvas, 0, 0);
-        // klatki trzymane jako JPEG, żeby długi klip nie zajął gigabajtów pamięci
-        frames.push(await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.93)));
-        if (++i % 15 === 0) prog(0.45 * Math.min(1, (w.timestamp - from) / (to - from)), `Czytanie klatek ${i}`);
-      }
-      if (frames.length > 1) fps = frames.length / (to - from);
-      const vcodec = (await mb.canEncodeVideo('vp9', { width: W, height: H })) ? 'vp9' : 'vp8';
-      vSrc = new mb.CanvasSource(cv, { codec: vcodec, bitrate: mb.QUALITY_HIGH });
-      output.addVideoTrack(vSrc, { frameRate: fps });
-      vSrc._cv = cv; vSrc._g = g;
-    }
-    let aSrc = null;
-    if (revAudio) { aSrc = new mb.AudioBufferSource({ codec: 'opus', bitrate: 160000 }); output.addAudioTrack(aSrc); }
-    await output.start();
-    if (vSrc) {
-      for (let k = 0; k < frames.length; k++) {
-        const bmp = await createImageBitmap(frames[frames.length - 1 - k]);
-        vSrc._g.drawImage(bmp, 0, 0);
-        bmp.close();
-        await vSrc.add(k / fps, 1 / fps);
-        if (k % 15 === 0) prog(0.45 + 0.5 * k / frames.length, `Kodowanie klatek ${k}/${frames.length}`);
-      }
-      frames.length = 0;
-    }
-    if (aSrc) await aSrc.add(revAudio);
-    await output.finalize();
-    const blob = new Blob([output.target.buffer], { type: m.kind === 'video' ? 'video/webm' : 'audio/webm' });
-    const nm = await importBlob(blob, m.name.replace(/\.[^.]+$/, '') + ' (wstecz).webm');
-    if (!nm) throw new Error('nie udało się wczytać odwróconego pliku');
-    for (const x of groupMembers(c)) if (isAV(x) && Math.abs(x.start - c.start) < EPS) { x.mediaId = nm.id; x.in = 0; x.kf = {}; }
-    gcPlayers();
-    commit(); renderAll();
-    prog(1, 'Gotowe');
-    toast('Klip odtwarza się teraz od końca (nowy plik jest w mediach)');
-  } catch (err) {
-    console.error(err);
-    prog(1, '');
-    toast('Nie udało się odwrócić klipu: ' + err.message, 5000);
-  }
+  setSpeed(c, -c.speed);
+  commit(); renderAll();
+  toast(c.speed < 0 ? 'Klip odtwarza się teraz od końca' : 'Klip odtwarza się znowu do przodu');
 }
 /* Postęp długich operacji w dymku */
 function progressToast(title) {

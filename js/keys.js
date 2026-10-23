@@ -42,12 +42,12 @@ function extendToPlayhead() {
     if (t > clipEnd(c)) {
       const next = others.find(o => o.start >= clipEnd(c) - EPS);
       let end = Math.min(t, next ? next.start : Infinity);
-      if (isAV(c) && m) end = Math.min(end, c.start + (m.duration - c.in) / c.speed);
+      if (isAV(c) && m) end = Math.min(end, clipEnd(c) + roomAfter(c, m));
       c.dur = Math.max(frame(), end - c.start);
     } else if (t < c.start) {
       const prevEnd = Math.max(0, ...others.filter(o => clipEnd(o) <= c.start + EPS).map(clipEnd));
       let ns = Math.max(t, prevEnd);
-      if (isAV(c)) ns = Math.max(ns, c.start - c.in / c.speed);
+      if (isAV(c)) ns = Math.max(ns, c.start - roomBefore(c, m));
       trimStartTo(c, ns);
     } else {
       // głowica wewnątrz klipu: bliższa krawędź jest dociągana do głowicy
@@ -220,7 +220,8 @@ const COMMANDS = [
   { id: 'pasteInsert', g: 'edit', label: 'Wklej z rozsunięciem reszty', short: 'Wklej+rozsuń', keys: ['ctrl+shift+v'], run: pasteInsert },
   { id: 'duplicate', g: 'edit', label: 'Duplikuj', short: 'Duplikuj', keys: ['ctrl+d'], run: duplicateSelected },
   { id: 'link', g: 'edit', label: 'Połącz / rozłącz obraz z dźwiękiem', short: 'Połącz', keys: ['ctrl+g'], run: toggleLink },
-  { id: 'detach', g: 'edit', label: 'Odłącz dźwięk od filmu', short: 'Odłącz dźw.', keys: ['ctrl+shift+u'], run: () => { const c = selectedClips().find(x => x.kind === 'video'); c ? detachAudio(c) : toast('Zaznacz klip wideo'); } },
+  { id: 'record', g: 'edit', label: 'Nagrywanie głosu z mikrofonu (otwórz panel / start / stop)', short: 'Nagraj głos', keys: ['shift+r'], run: () => (rec.dlg?.open ? (recRecording() ? recStop() : recStart()) : openRecorder()) },
+  { id: 'detach', g: 'edit', label: 'Rozdziel obraz i dźwięk filmu', short: 'Rozdziel', keys: ['ctrl+shift+u'], run: () => splitAV() },
   { id: 'toggleOff', g: 'edit', label: 'Wyłącz / włącz klip', short: 'Wył. klip', keys: ['shift+e'], run: toggleClipsOff },
   { id: 'transition', g: 'edit', label: 'Dodaj przejście (0,5 s)', short: 'Przejście', keys: ['shift+d'], run: addDefaultTransition },
   { id: 'freeze', g: 'edit', label: 'Stopklatka w miejscu głowicy (2 s)', short: 'Stopklatka', keys: ['shift+f'], run: freezeFrame },
@@ -365,7 +366,8 @@ document.addEventListener('keydown', e => {
   if (keyCapture) return;
   if (!$('#authScreen').hidden || fp.el || isHomeOpen()) return; // logowanie, menu główne albo wybór czcionki mają własną obsługę klawiszy
   if (!menuEl.hidden && menuKey(e)) return;
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog[open]:not(.rec-dlg)')) return; // panel nagrywania nie blokuje skrótów (spacja = odtwarzanie)
+  if (e.target.closest('.rec-dlg')) return; // …ale klawisze w samym panelu obsługuje on sam
   if (e.target.closest('input, textarea, select, [contenteditable]')) {
     if (e.key === 'Escape') e.target.blur();
     return;
@@ -384,7 +386,7 @@ document.addEventListener('keydown', e => {
 
 /* Podpowiedzi przy przyciskach i atrybuty aria-keyshortcuts */
 const HINTS = {
-  btnPlay: 'play', btnSplit: 'split', btnDelete: 'delete', btnRipple: 'rippleDelete', btnLink: 'link', btnMarker: 'marker',
+  btnPlay: 'play', btnSplit: 'split', btnDelete: 'delete', btnRipple: 'rippleDelete', btnLink: 'link', btnSplitAV: 'detach', btnRecord: 'record', btnMarker: 'marker',
   toolRipple: 'toolRipple', toolRoll: 'toolRoll', toolSlip: 'toolSlip', btnMixer: 'mixer',
   btnText: 'addText', btnSnap: 'snap', btnFit: 'zoomFit', toolSelect: 'toolSelect', toolBlade: 'toolBlade', btnUndo: 'undo',
   btnRedo: 'redo', btnExport: 'export', btnProjects: 'projects', btnImport: 'import', btnGuides: 'guides', btnSnapshot: 'exportFrame',

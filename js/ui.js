@@ -342,7 +342,48 @@ const inspClosed = new Set(['crop', 'key']);
 const IN_TYPES = [['fade', 'Pojawienie'], ['slide-l', 'Wjazd z lewej'], ['slide-r', 'Wjazd z prawej'], ['slide-u', 'Wjazd z góry'], ['slide-d', 'Wjazd z dołu'], ['zoom-in', 'Powiększenie'], ['zoom-out', 'Najazd z bliska'], ['wipe', 'Odsłonięcie'], ['blur', 'Wyostrzenie'], ['pop', 'Wyskok'], ['spin', 'Obrót'], ['type', 'Maszyna do pisania (napis)']];
 const OUT_TYPES = [['fade', 'Zniknięcie'], ['slide-l', 'Wyjazd w lewo'], ['slide-r', 'Wyjazd w prawo'], ['slide-u', 'Wyjazd w górę'], ['slide-d', 'Wyjazd w dół'], ['zoom-in', 'Pomniejszenie'], ['zoom-out', 'Odjazd'], ['wipe', 'Zasłonięcie'], ['blur', 'Rozmycie'], ['spin', 'Obrót']];
 const BLENDS = [['source-over', 'Normalny'], ['multiply', 'Mnożenie'], ['screen', 'Rozjaśnianie'], ['overlay', 'Nakładka'], ['soft-light', 'Łagodne światło'], ['lighten', 'Jaśniejszy'], ['darken', 'Ciemniejszy'], ['difference', 'Różnica']];
-const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+/* Suwak prędkości: w prawo do 100×, w lewo wstecz do −100×, środek = najwolniej (0,1×); skala logarytmiczna,
+   więc zakres 0,5–4× zajmuje tyle miejsca co 10–100× */
+const SPEED_POS = 1000, SPEED_LOG = Math.log(SPEED_MAX / SPEED_MIN);
+const speedToPos = s => (s < 0 ? -1 : 1) * Math.round(SPEED_POS * Math.log(clamp(Math.abs(s), SPEED_MIN, SPEED_MAX) / SPEED_MIN) / SPEED_LOG);
+function posToSpeed(p) {
+  const mag = SPEED_MIN * Math.exp(SPEED_LOG * Math.abs(p) / SPEED_POS);
+  const st = mag < 2 ? 0.01 : mag < 10 ? 0.05 : mag < 50 ? 0.5 : 1; // okrągłe wartości
+  let v = Math.round(mag / st) * st;
+  if (Math.abs(v - 1) < 0.04) v = 1; // przyciąganie do normalnej prędkości
+  return (p < 0 ? -1 : 1) * +clamp(v, SPEED_MIN, SPEED_MAX).toFixed(2);
+}
+const speedDesc = s => (s < 0 ? `wstecz, ${fmtSpeed(-s)}×` : s === 1 ? 'normalna' : s < 1 ? `zwolnione, ${fmtSpeed(s)}×` : `przyspieszone, ${fmtSpeed(s)}×`);
+const SPEED_TICKS = [-100, -10, -1, 1, 10, 100];
+function speedField(c) {
+  const s = c.speed, sign = s < 0 ? -1 : 1;
+  const tick = v => `<span style="left:calc(7px + (100% - 14px) * ${(0.5 + speedToPos(v) / SPEED_POS / 2).toFixed(4)})">${v < 0 ? '−' + -v : v}×</span>`; // środek gałki suwaka
+  return `<div class="field spd-field">
+      <div class="lbl"><label for="c-speed">Prędkość</label>
+        <span class="lbl-r"><input type="text" inputmode="decimal" class="spd-num" id="c-speedNum" data-clip="speedNum" value="${String(s).replace('.', ',')}" aria-label="Prędkość jako liczba (ujemna = wstecz)" spellcheck="false">×</span></div>
+      <input type="range" id="c-speed" data-clip="speed" min="${-SPEED_POS}" max="${SPEED_POS}" step="1" value="${speedToPos(s)}" aria-valuetext="${speedDesc(s)}">
+      <div class="spd-scale" aria-hidden="true">${SPEED_TICKS.map(tick).join('')}</div>
+      <div class="chips spd-chips">
+        <button type="button" class="chip" data-spd="flip" aria-pressed="${s < 0}">◀ Wstecz</button>
+        ${[0.5, 1, 2, 4, 10].map(v => `<button type="button" class="chip" data-spd="${v * sign}" aria-pressed="${Math.abs(s) === v}">${fmtSpeed(v)}×</button>`).join('')}
+      </div>
+      <p class="hint" id="spdHint">${speedHint(s)}</p>
+    </div>`;
+}
+function speedHint(s) {
+  if (s < 0) return 'Klip odtwarza się od końca. ' + (s < -16 ? 'W podglądzie obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.' : 'Dźwięk też gra wstecz.');
+  if (s > 16) return 'W podglądzie powyżej 16× obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.';
+  return s === 1 ? 'Przeciągnij w lewo za środek, żeby odtwarzać wstecz.' : s < 1 ? 'Zwolnione tempo.' : 'Przyspieszone tempo.';
+}
+/* Odświeżenie pola prędkości bez przebudowy inspektora (suwak trzymany myszą zostaje pod kursorem) */
+function showSpeed(s) {
+  const num = $('#c-speedNum'), r = $('#c-speed'), h = $('#spdHint');
+  if (num && num !== document.activeElement) num.value = String(s).replace('.', ',');
+  if (r) { r.setAttribute('aria-valuetext', speedDesc(s)); if (r !== document.activeElement) { r.value = speedToPos(s); paintRange(r); } }
+  if (h) h.textContent = speedHint(s);
+  for (const b of $$('.spd-chips [data-spd]')) b.setAttribute('aria-pressed', b.dataset.spd === 'flip' ? s < 0 : Math.abs(+b.dataset.spd) === Math.abs(s));
+}
+let speedBase = null; // klipy sprzed przeciągania suwaka prędkości
 
 const single = () => (sel.size === 1 ? clipById([...sel][0]) : null);
 const fid = path => 'p-' + path.replace(/\./g, '-');
@@ -475,7 +516,7 @@ function clipInspector(c) {
       <div class="field"><label for="c-start">Początek (s)</label><input type="number" id="c-start" data-clip="start" min="0" step="0.1" value="${+c.start.toFixed(3)}"></div>
       <div class="field"><label for="c-dur">Długość (s)</label><input type="number" id="c-dur" data-clip="dur" min="0.04" step="0.1" value="${+c.dur.toFixed(3)}"></div>
     </div>`;
-  if (isAV(c)) clipBody += `<div class="field"><label for="c-speed">Prędkość</label><select id="c-speed" data-clip="speed">${opts(SPEEDS.map(s => [s, String(s).replace('.', ',') + '×' + (s === 1 ? ' (normalna)' : s < 1 ? ' (zwolnione)' : ' (przyspieszone)')]), SPEEDS.includes(c.speed) ? c.speed : 1)}</select></div>`;
+  if (isAV(c)) clipBody += speedField(c);
   h += sec('clip', 'Klip', clipBody);
 
   if (c.kind === 'text') {
@@ -628,7 +669,7 @@ function clipInspector(c) {
     ${isTransition(P.inType) ? '<p class="hint">Przejście łączy ten klip z poprzednim, gdy oba stykają się na tej samej ścieżce. Bez poprzedniego klipu działa jak wejście na tło.</p>' : ''}`);
 
   h += `<div class="insp-actions">
-    ${c.kind === 'video' && !P.detached && m?.hasAudio ? '<button class="btn small" data-act="detach">Odłącz dźwięk</button>' : ''}
+    ${c.kind === 'video' && !P.detached && m?.hasAudio ? '<button class="btn small" data-act="detach">Rozdziel obraz i dźwięk</button>' : ''}
     ${c.kind === 'video' ? '<button class="btn small" data-act="freeze">Stopklatka</button>' : ''}
     ${c.group ? '<button class="btn small" data-act="link">Rozłącz</button>' : ''}
     <button class="btn small" data-act="dup">Duplikuj</button>
@@ -669,6 +710,14 @@ function readVal(el) {
 inspEl.addEventListener('input', e => {
   const el = e.target;
   const c = single();
+  if (c && el.id === 'c-speed') {
+    speedBase ||= new Map(groupMembers(c).map(x => [x.id, { start: x.start, in: x.in, dur: x.dur, speed: x.speed, kf: structuredClone(x.kf || {}) }]));
+    const sp = posToSpeed(+el.value);
+    setSpeed(c, sp, speedBase);
+    showSpeed(sp);
+    renderLanes(); syncMedia(); drawFrame();
+    return;
+  }
   if (!c || !el.dataset.path) return;
   const v = readVal(el);
   if (el.hasAttribute('data-kf')) setProp(c, el.dataset.path, v); else setPath(c.props, el.dataset.path, v);
@@ -698,7 +747,12 @@ inspEl.addEventListener('change', e => {
     if (f === 'name') c.name = el.value.trim();
     else if (f === 'off') { for (const x of groupMembers(c)) x.off = !el.checked; }
     else if (f === 'lut') c.props.lut = el.value ? { id: el.value, amount: c.props.lut?.amount ?? 100 } : null;
-    else if (f === 'speed') setSpeed(c, +el.value);
+    else if (f === 'speed') { setSpeed(c, posToSpeed(+el.value), speedBase); speedBase = null; }
+    else if (f === 'speedNum') {
+      const v = parseFloat(String(el.value).replace(',', '.').replace('−', '-'));
+      if (!isFinite(v) || v === 0) { toast('Wpisz prędkość od −100 do 100 (bez zera), np. 2 albo −1,5'); el.value = String(c.speed).replace('.', ','); return; }
+      setSpeed(c, v);
+    }
     else {
       const v = Math.max(0, parseFloat(String(el.value).replace(',', '.')) || 0);
       if (f === 'start') {
@@ -710,7 +764,7 @@ inspEl.addEventListener('change', e => {
       } else {
         const m = media.get(c.mediaId);
         let d = Math.max(frame(), v);
-        if (isAV(c) && m) d = Math.min(d, (m.duration - c.in) / c.speed);
+        if (isAV(c) && m) d = Math.min(d, c.dur + roomAfter(c, m));
         for (const x of groupMembers(c)) {
           if (overlaps(x.trackId, x.start, x.start + d, x.id)) { toast('Klip nachodziłby na następny'); d = null; break; }
         }
@@ -737,6 +791,15 @@ inspEl.addEventListener('click', async e => {
       commit(); renderInspector(); renderLanes(); drawFrame();
       $('#p-font')?.focus();
     });
+    return;
+  }
+  const spdBtn = e.target.closest('[data-spd]');
+  if (spdBtn) {
+    const c = single();
+    if (!c) return;
+    setSpeed(c, spdBtn.dataset.spd === 'flip' ? -c.speed : +spdBtn.dataset.spd);
+    commit(); renderAll();
+    $(`.spd-chips [data-spd="${spdBtn.dataset.spd === 'flip' ? 'flip' : c.speed}"]`)?.focus();
     return;
   }
   const kb = e.target.closest('[data-kfbtn]');
@@ -784,7 +847,7 @@ inspEl.addEventListener('click', async e => {
   else if (act === 'dup') duplicateSelected();
   else if (act === 'copy') copySelected();
   else if (act === 'link') toggleLink();
-  else if (act === 'detach' && c) detachAudio(c);
+  else if (act === 'detach' && c) splitAV();
   else if (act === 'freeze') freezeFrame();
   else if (act === 'normalize' && c) normalizeClip(c);
   else if (act === 'mute' && c) { delete c.kf.volume; c.props.volume = 0; commit(); renderInspector(); }
@@ -941,6 +1004,7 @@ $('#btnProjects').addEventListener('click', () => showHome()); // menu główne 
 $('#toolSelect').addEventListener('click', () => setTool('select'));
 $('#toolBlade').addEventListener('click', () => setTool('blade'));
 $('#btnSplit').addEventListener('click', () => splitAt(playhead));
+$('#btnSplitAV').addEventListener('click', () => splitAV());
 $('#btnDelete').addEventListener('click', () => deleteSelected(false));
 $('#btnRipple').addEventListener('click', () => deleteSelected(true));
 $('#btnLink').addEventListener('click', toggleLink);
@@ -980,6 +1044,7 @@ window.addEventListener('beforeunload', e => {
 for (const b of $$('[data-tool]')) b.addEventListener('click', () => setTool(b.dataset.tool));
 $('#btnPro').addEventListener('click', e => openProMenu(e.currentTarget));
 $('#btnMixer').addEventListener('click', () => openMixer());
+$('#btnRecord').addEventListener('click', () => (rec.dlg?.open ? closeRecorder() : openRecorder()));
 
 /* =========================================================
    Suwaki: wypełnienie do bieżącej wartości (od zera, gdy zakres ma wartości ujemne)

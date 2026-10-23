@@ -126,7 +126,7 @@ function getPlayer(c) {
     const m = media.get(c.mediaId);
     const el = document.createElement(c.kind === 'audio' ? 'audio' : 'video');
     el.preload = 'auto'; el.playsInline = true; el.preservesPitch = true; el.src = m.url;
-    el.addEventListener('seeked', requestDraw);
+    el.addEventListener('seeked', () => { if (p?.seekMode) snapPlayer(p); requestDraw(); });
     el.addEventListener('loadeddata', requestDraw);
     const ac = ensureAudio();
     const src = ac.createMediaElementSource(el);
@@ -142,6 +142,7 @@ function getPlayer(c) {
 function wirePlayer(c, p) {
   const sig = afxSig(c.props.afx) + '#' + c.trackId;
   if (p.sig === sig) return;
+  stopRev(p);
   try { p.src.disconnect(); } catch { /* nie było połączeń */ }
   try { p.gain.disconnect(); } catch { /* j.w. */ }
   if (p.fx) { try { p.fx.output.disconnect(); } catch { /* j.w. */ } }
@@ -151,9 +152,21 @@ function wirePlayer(c, p) {
   p.gain.connect(getBus(c.trackId).input);
   p.sig = sig;
 }
+/* Przy odtwarzaniu wstecz i powyżej 16× film jest przewijany co klatkę, a w trakcie przewijania odtwarzacz nie ma obrazu —
+   podgląd pokazuje wtedy ostatnią gotową klatkę zamiast czarnego ekranu */
+function snapPlayer(p) {
+  const v = p.el;
+  if (v.readyState < 2 || !v.videoWidth) return;
+  const k = Math.min(1, 1280 / v.videoWidth), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+  p.snap ||= document.createElement('canvas');
+  if (p.snap.width !== w || p.snap.height !== h) { p.snap.width = w; p.snap.height = h; }
+  p.snap.getContext('2d').drawImage(v, 0, 0, w, h);
+  p.snapOk = true;
+}
 function dropPlayer(id) {
   const p = players.get(id);
   if (!p) return;
+  stopRev(p);
   p.el.pause();
   try { p.src.disconnect(); p.gain.disconnect(); p.fx?.output.disconnect(); } catch { /* już odłączone */ }
   p.el.removeAttribute('src'); p.el.load();
@@ -194,6 +207,57 @@ function audioGain(c, t, tail) {
   }
   return Math.max(0, g);
 }
+/* Dźwięk wstecz w podglądzie: odtwarzacz przeglądarki gra tylko do przodu, więc gramy odwróconą kopię
+   zdekodowanego dźwięku pliku przez Web Audio (wpięta w efekty i głośność klipu jak zwykły dźwięk) */
+const revBufs = new Map();
+function reverseAudioBuffer(buf) {
+  const r = new AudioBuffer({ length: buf.length, numberOfChannels: buf.numberOfChannels, sampleRate: buf.sampleRate });
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const a = buf.getChannelData(ch), b = r.getChannelData(ch);
+    for (let i = 0, n = a.length; i < n; i++) b[i] = a[n - 1 - i];
+  }
+  return r;
+}
+async function reversedBufferAsync(mediaId) {
+  const have = revBufs.get(mediaId);
+  if (have instanceof AudioBuffer) return have;
+  const buf = await decodedBuffer(mediaId);
+  const r = buf ? reverseAudioBuffer(buf) : null;
+  revBufs.set(mediaId, r);
+  return r;
+}
+function reversedBuffer(mediaId) {
+  const have = revBufs.get(mediaId);
+  if (have !== undefined) return have instanceof AudioBuffer ? have : null;
+  if (media.get(mediaId)?.blob?.size > 700e6) { revBufs.set(mediaId, null); return null; } // za duży, by trzymać w pamięci podglądu
+  revBufs.set(mediaId, 'pending');
+  reversedBufferAsync(mediaId).catch(() => revBufs.set(mediaId, null));
+  return null;
+}
+function stopRev(p) {
+  if (!p.rev) return;
+  try { p.rev.node.stop(); } catch { /* już zatrzymany */ }
+  p.rev.node.disconnect();
+  p.rev = null;
+}
+function playRev(p, target, r) {
+  const ac = audioCtx;
+  if (p.rev) {
+    const expect = p.rev.src0 - (ac.currentTime - p.rev.t0) * p.rev.rate;
+    if (p.rev.rate === r && Math.abs(expect - target) < 0.12 * Math.max(1, r)) return;
+    stopRev(p);
+  }
+  const buf = reversedBuffer(p.mediaId);
+  if (!buf) return;
+  const off = buf.duration - target;
+  if (off < 0 || off >= buf.duration) return;
+  const node = ac.createBufferSource();
+  node.buffer = buf;
+  node.playbackRate.value = r;
+  node.connect(p.fx.input);
+  node.start(0, off);
+  p.rev = { node, t0: ac.currentTime, src0: target, rate: r };
+}
 function srcTimeOf(c, t) {
   const m = media.get(c.mediaId);
   return clamp(c.in + (t - c.start) * c.speed, 0, Math.max(0, (m?.duration || 0) - 0.001));
@@ -211,27 +275,36 @@ function syncMedia() {
     const soon = live && c.start - t > 0 && c.start - t < 1.5;
     if (!active && !soon) {
       const p = players.get(c.id);
-      if (p) { if (!p.el.paused) p.el.pause(); p.gain.gain.value = 0; }
+      if (p) { if (!p.el.paused) p.el.pause(); p.gain.gain.value = 0; stopRev(p); }
       continue;
     }
     const p = getPlayer(c), el = p.el;
     if (active) {
       const target = srcTimeOf(c, t);
-      const pr = clamp(c.speed * (live ? rate : 1), 0.0625, 16);
+      const sp = c.speed * (live ? rate : 1);
+      // przeglądarka odtwarza tylko do przodu i w zakresie 1/16–16× — wstecz i szybciej obraz idzie skokami (przewijanie)
+      const native = sp >= 0.0625 && sp <= 16;
+      const seekMode = live && !native;
+      if (seekMode && !p.seekMode && !el.seeking) snapPlayer(p);
+      if (!seekMode) p.snapOk = false;
+      p.seekMode = seekMode;
+      const pr = clamp(sp, 0.0625, 16);
       if (el.playbackRate !== pr) el.playbackRate = pr;
       const atEnd = el.duration && target >= el.duration - 0.05;
-      if (live && !atEnd) {
+      if (live && native && !atEnd) {
         if (el.paused) {
           if (Math.abs(el.currentTime - target) > 0.04) el.currentTime = target;
           el.play().catch(() => {});
         } else if (Math.abs(el.currentTime - target) > 0.2 * Math.max(1, pr)) el.currentTime = target;
       } else {
         if (!el.paused) el.pause();
-        if (!exportFrames?.has(c.id) && Math.abs(el.currentTime - target) > frame() / 2 && (!el.seeking || scrubbing)) el.currentTime = target;
+        if (!exportFrames?.has(c.id) && Math.abs(el.currentTime - target) > frame() / 2 && (!el.seeking || (scrubbing && !live))) el.currentTime = target;
       }
+      if (live && sp < 0 && -sp <= 16) playRev(p, target, -sp); else stopRev(p);
       p.gain.gain.value = live ? audioGain(c, t, t >= clipEnd(c) ? tail : 0) : 0;
     } else {
       if (!el.paused) el.pause();
+      stopRev(p);
       p.gain.gain.value = 0;
       if (!el.seeking && Math.abs(el.currentTime - c.in) > 0.1) el.currentTime = c.in; // przygotowanie cięcia
     }
@@ -754,8 +827,11 @@ function drawVisual(c, t, tailMode, trans) {
       if (ef) { src = ef; sw = ef.width; sh = ef.height; }
       else {
         const p = getPlayer(c);
-        if (p.el.readyState < 2 || !p.el.videoWidth) return;
-        src = p.el; sw = p.el.videoWidth; sh = p.el.videoHeight;
+        if (p.seekMode && p.snapOk && (p.el.seeking || p.el.readyState < 2)) { src = p.snap; sw = p.snap.width; sh = p.snap.height; }
+        else {
+          if (p.el.readyState < 2 || !p.el.videoWidth) return;
+          src = p.el; sw = p.el.videoWidth; sh = p.el.videoHeight;
+        }
       }
     } else if (c.kind === 'image') {
       const m = media.get(c.mediaId);
@@ -1052,7 +1128,7 @@ function pause() {
   playStopAt = null;
   document.body.classList.remove('is-playing');
   $('#btnPlay').setAttribute('aria-label', 'Odtwórz');
-  for (const p of players.values()) { p.el.pause(); p.gain.gain.value = 0; }
+  for (const p of players.values()) { p.el.pause(); p.gain.gain.value = 0; stopRev(p); }
   updateRateBadge();
   syncMedia(); drawFrame(); updatePlayheadUI(true); drawMeter(true);
   renderInspectorValues();
