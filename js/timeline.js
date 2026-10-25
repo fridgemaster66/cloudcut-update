@@ -254,19 +254,27 @@ function splitAV() {
 
 /* Rampa prędkości (time remapping z Premiere): klip dzielony na odcinki z płynnie zmienianą prędkością.
    Każdy odcinek gra taki sam kawałek pliku, więc całość pokazuje ten sam materiał, tylko w innym tempie. */
+/* f(u, lo, hi): prędkość w chwili u (0–1) przy najwolniej lo i najszybciej hi (ustawienia pod przyciskami rampy).
+   Rampy „do 10×” mają tempo na sztywno — to gotowe efekty z montażu dynamicznych filmów. */
 const RAMPS = {
-  dip: { name: 'Szybko → wolno → szybko', f: u => 0.3 + 2.7 * Math.pow(Math.abs(2 * u - 1), 1.6) },
-  bump: { name: 'Wolno → szybko → wolno', f: u => 3 - 2.7 * Math.pow(Math.abs(2 * u - 1), 1.6) },
-  up: { name: 'Przyspieszenie', f: u => 0.35 + 2.65 * u * u },
-  down: { name: 'Hamowanie', f: u => 3 - 2.65 * u * u },
+  dip: { name: 'Szybko → wolno → szybko', f: (u, lo, hi) => lo + (hi - lo) * Math.pow(Math.abs(2 * u - 1), 1.6) },
+  bump: { name: 'Wolno → szybko → wolno', f: (u, lo, hi) => hi - (hi - lo) * Math.pow(Math.abs(2 * u - 1), 1.6) },
+  up: { name: 'Przyspieszenie', f: (u, lo, hi) => lo + (hi - lo) * u * u },
+  down: { name: 'Hamowanie', f: (u, lo, hi) => hi - (hi - lo) * u * u },
+  burst: { name: 'Do 10× i z powrotem', n: 16, f: u => 1 + 9 * Math.pow(Math.sin(Math.PI * u), 2) }, // płynna fala 1× → 10× → 1×
+  burstslow: { name: 'Do 10× i slow-motion', n: 16, f: u => (u < 0.5 ? 1 + 9 * Math.pow(Math.sin(Math.PI * u / 0.5), 2) : 1 - 0.65 * smooth(clamp((u - 0.5) / 0.2, 0, 1))) },
 };
-function speedRamp(c, kind, n = 12) {
+function rampPrefs() {
+  try { const p = JSON.parse(localStorage.getItem('cloudcut-ramp') || '{}'); return { lo: clamp(+p.lo || 0.3, 0.1, 1), hi: clamp(+p.hi || 3, 1.5, 20) }; } catch { return { lo: 0.3, hi: 3 }; }
+}
+function speedRamp(c, kind, n = RAMPS[kind]?.n || 12) {
   const R = RAMPS[kind];
   if (!R || !isAV(c) || isLocked(c)) return;
   const members = groupMembers(c).filter(x => isAV(x) && Math.abs(x.start - c.start) < EPS && Math.abs(x.dur - c.dur) < EPS);
   const base = Math.abs(c.speed), sign = c.speed < 0 ? -1 : 1;
   const chunk = c.dur * base / n; // tyle pliku gra każdy odcinek
-  const speeds = [...Array(n)].map((_, i) => clamp(base * R.f((i + 0.5) / n), SPEED_MIN, SPEED_MAX));
+  const { lo, hi } = rampPrefs();
+  const speeds = [...Array(n)].map((_, i) => clamp(base * R.f((i + 0.5) / n, lo, hi), SPEED_MIN, SPEED_MAX));
   const total = speeds.reduce((a, s) => a + chunk / s, 0);
   const delta = total - c.dur, oldEnd = clipEnd(c);
   // reszta tych ścieżek przesuwa się o zmianę długości (jak „rozsuń” w Premiere) — razem z połączonymi klipami
@@ -364,20 +372,64 @@ function normalizeClip(c) {
   toast(`Głośność ustawiona na ${Math.round(v * 100)}% (szczyt −0,4 dB)`);
 }
 
-async function freezeFrame() {
-  const t = playhead;
-  let c = selectedClips().find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x));
-  c ||= state.tracks.filter(tr => tr.kind === 'video' && !tr.hidden).map(tr => clipsOn(tr.id).find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x))).find(Boolean);
-  if (!c) { toast('Ustaw głowicę na klipie wideo'); return; }
-  const p = getPlayer(c);
-  await seekTo(p.el, srcTimeOf(c, t));
+/* Klip wideo pod głowicą (zaznaczony ma pierwszeństwo) i jego klatka jako zdjęcie w mediach */
+function videoClipAt(t) {
+  const c = selectedClips().find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x));
+  return c || state.tracks.filter(tr => tr.kind === 'video' && !tr.hidden).map(tr => clipsOn(tr.id).find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x))).find(Boolean);
+}
+async function frameAsMedia(c, t) {
+  const src = srcTimeOf(c, t), m = media.get(c.mediaId);
+  // dokładna klatka prosto z dekodera (odtwarzacz tuż po przewinięciu potrafi oddać jeszcze poprzednią)
+  let frame = null;
+  try {
+    const mb = await loadMediabunny();
+    const track = await new mb.Input({ source: new mb.BlobSource(m.blob), formats: mb.ALL_FORMATS }).getPrimaryVideoTrack();
+    if (track && await track.canDecode()) frame = (await new mb.CanvasSink(track).getCanvas(src))?.canvas || null;
+  } catch { /* zostaje odtwarzacz */ }
+  if (!frame) { const p = getPlayer(c); await seekTo(p.el, src); frame = p.el; }
   const cv = document.createElement('canvas');
-  cv.width = p.el.videoWidth; cv.height = p.el.videoHeight;
-  cv.getContext('2d').drawImage(p.el, 0, 0);
+  cv.width = frame.videoWidth || frame.width; cv.height = frame.videoHeight || frame.height;
+  cv.getContext('2d').drawImage(frame, 0, 0);
   const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
-  const m = await importBlob(blob, `${clipLabel(c)} — stopklatka ${tc(t)}.png`);
+  return importBlob(blob, `${clipLabel(c)} — stopklatka ${tc(t)}.png`);
+}
+/* Zamrożenie od głowicy do końca klipu (jak „Add Frame Hold” w Premiere): obraz stoi, dźwięk filmu gra dalej */
+async function freezeRest() {
+  const t = playhead;
+  const c = videoClipAt(t);
+  if (!c) { toast('Ustaw głowicę na klipie wideo'); return; }
+  if (isLocked(c)) { toast('Ścieżka tego klipu jest zablokowana'); return; }
+  const m = await frameAsMedia(c, t);
   if (!m) return;
-  const d = 2;
+  const r = t > c.start + EPS ? splitClip(c, t) : c; // prawa część od głowicy
+  if (r !== c && c.group) r.group = null;
+  if (media.get(r.mediaId)?.hasAudio && !r.props.detached) detachAudio(r, { linked: false, quiet: true }); // dźwięk zostaje jako osobny klip
+  const img = newClip('image', r.trackId, r.start, r.dur, { mediaId: m.id, name: m.name });
+  img.props = { ...structuredClone(r.props), fadeIn: 0, inType: 'fade' };
+  delete img.props.volume; delete img.props.detached; delete img.props.afx;
+  img.kf = structuredClone(r.kf || {});
+  delete img.kf.volume;
+  state.clips = state.clips.filter(x => x.id !== r.id);
+  state.clips.push(img);
+  sel = new Set([img.id]);
+  commit(); renderAll();
+  toast(`Zamrożono obraz od ${tc(t)} do końca klipu (${shortDur(img.dur)})`);
+}
+/* Przycisk „Zamroź” na pasku: wybór rodzaju zamrożenia */
+function freezeMenu(btn) {
+  const r = btn.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, [
+    { label: 'Stopklatka 2 s — wstaw i rozsuń resztę', key: keyLabel('freeze'), act: () => freezeFrame() },
+    { label: 'Stopklatka o wybranej długości…', act: async () => { const v = await ask('Długość stopklatki (sekundy)', '3', { ok: 'Wstaw' }); const d = parseFloat(String(v).replace(',', '.')); if (d > 0) freezeFrame(Math.min(600, d)); } },
+    { label: 'Zamroź od głowicy do końca klipu', act: freezeRest },
+  ]);
+}
+async function freezeFrame(d = 2) {
+  const t = playhead;
+  const c = videoClipAt(t);
+  if (!c) { toast('Ustaw głowicę na klipie wideo'); return; }
+  const m = await frameAsMedia(c, t);
+  if (!m) return;
   rippleInsert(t, d);
   const img = newClip('image', c.trackId, t, d, { mediaId: m.id, name: m.name });
   img.props = { ...structuredClone(c.props), fadeIn: 0, fadeOut: 0, inType: 'fade', outType: 'fade' };
@@ -385,7 +437,7 @@ async function freezeFrame() {
   state.clips.push(img);
   sel = new Set([img.id]);
   commit(); renderAll();
-  toast('Wstawiono stopklatkę (2 s)');
+  toast(`Wstawiono stopklatkę (${shortDur(d)})`);
 }
 
 /* Q / W — przycięcie początku lub końca do głowicy z zsunięciem reszty */
@@ -552,7 +604,7 @@ function clipHtml(c) {
   const label = clipLabel(c);
   const icon = c.kind === 'text' ? ICON.text : c.group ? ICON.link : '';
   const spd = c.speed !== 1 ? `<span class="spd" title="${c.speed < 0 ? 'Odtwarzanie wstecz' : 'Prędkość'}">${c.speed < 0 ? '◀ ' : ''}${fmtSpeed(Math.abs(c.speed))}×</span>` : '';
-  const tags = [P.key?.on && 'klucz', P.lut?.id && 'LUT', P.mask?.type && P.mask.type !== 'none' && 'maska', P.afx && Object.values(P.afx).some(Boolean) && 'efekty audio'].filter(Boolean);
+  const tags = [P.key?.on && 'klucz', P.lut?.id && 'LUT', P.mask?.type && P.mask.type !== 'none' && 'maska', P.afx && Object.entries(P.afx).some(([k, v]) => v && v !== AFX0[k]) && 'efekty audio'].filter(Boolean);
   const fx = tags.length ? ' · ' + tags.join(' · ') : '';
   return `<div class="clip k-${c.kind}${sel.has(c.id) ? ' sel' : ''}${c.off ? ' off' : ''}" data-clip="${c.id}" style="${clipStyle(c)}" title="${esc(label)} — ${shortDur(c.dur)}">
     ${waveHtml(c)}${tb}${fi}${fo}${kfs}<div class="h h-l" data-h="l"></div><span class="clip-name">${icon}${spd}${esc(label)}${fx}</span><div class="h h-r" data-h="r"></div></div>`;
@@ -1110,7 +1162,8 @@ lanesEl.addEventListener('contextmenu', e => {
     ];
     if (c.kind === 'video') {
       items.push({ label: 'Rozdziel obraz i dźwięk', key: keyLabel('detach'), disabled: !media.get(c.mediaId)?.hasAudio || (c.props.detached && groupMembers(c).length < 2), act: splitAV });
-      items.push({ label: 'Stopklatka w miejscu głowicy (2 s)', key: keyLabel('freeze'), act: freezeFrame });
+      items.push({ label: 'Stopklatka w miejscu głowicy (2 s)', key: keyLabel('freeze'), act: () => freezeFrame() });
+      items.push({ label: 'Zamroź od głowicy do końca klipu', act: freezeRest });
     }
     if (isAV(c)) {
       items.push({ label: 'Normalizuj głośność', disabled: !media.get(c.mediaId)?.peak, act: () => normalizeClip(c) });

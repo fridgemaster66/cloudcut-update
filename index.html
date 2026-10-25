@@ -51,6 +51,7 @@
       <button role="tab" id="tab-titles" aria-selected="false" aria-controls="panel-titles" data-tab="titles" tabindex="-1">Napisy</button>
       <button role="tab" id="tab-trans" aria-selected="false" aria-controls="panel-trans" data-tab="trans" tabindex="-1">Przejścia</button>
       <button role="tab" id="tab-assets" aria-selected="false" aria-controls="panel-assets" data-tab="assets" tabindex="-1">Assety</button>
+      <button role="tab" id="tab-lib" aria-selected="false" aria-controls="panel-lib" data-tab="lib" tabindex="-1" title="Biblioteka — Twoje pliki do wszystkich projektów">Biblioteka</button>
     </div>
     <div class="tabpanel" id="panel-media" role="tabpanel" aria-labelledby="tab-media" data-panel="media">
       <div class="bin-tools">
@@ -100,6 +101,14 @@
       <div class="asset-cats" id="assetCats" role="group" aria-label="Kategorie assetów"></div>
       <div id="assetList" class="preset-scroll"></div>
     </div>
+    <div class="tabpanel" id="panel-lib" role="tabpanel" aria-labelledby="tab-lib" data-panel="lib" hidden>
+      <div class="bin-tools">
+        <input type="search" id="elibSearch" placeholder="Szukaj w Bibliotece…" aria-label="Szukaj w Bibliotece">
+        <button type="button" class="btn small" id="elibManage" title="Dodawaj pliki i foldery w menu głównym">Zarządzaj</button>
+      </div>
+      <nav class="lib-path elib-path" id="elibPath" aria-label="Folder w Bibliotece"></nav>
+      <div id="elibList" class="preset-scroll"></div>
+    </div>
     <input type="file" id="fileInput" multiple accept="video/*,audio/*,image/*,.srt,.vtt" hidden>
     <input type="file" id="lutInput" accept=".cube" hidden>
   </section>
@@ -118,6 +127,9 @@
           <option value="0.5">Połowa</option>
           <option value="0.25">Ćwierć</option>
         </select>
+        <button class="anim-toggle" id="btnAnim" aria-pressed="false" title="Tryb animacji: każda zmiana zapisuje się jako klatka kluczowa w miejscu głowicy (Alt+A)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 12 12 21 3 12z"/></svg>Animuj
+        </button>
         <button class="icon-btn" id="btnScopes" aria-pressed="false" title="Wskaźniki: histogram, przebieg, parada RGB, wektorskop" aria-label="Wskaźniki obrazu">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M5 20V12M9 20V6M13 20v-9M17 20V9M21 20v-4"/></svg>
         </button>
@@ -230,6 +242,9 @@
     <button class="tool" id="btnSplitAV" title="Rozdziel obraz i dźwięk zaznaczonego filmu na osobne klipy (Ctrl+Shift+U)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5"/><path d="M3 17h2l1.5-2.5 2 5 2-7 2 6 1.5-3.5 1.5 2H21"/></svg>Rozdziel
     </button>
+    <button class="tool" id="btnFreeze" title="Zamroź obraz: stopklatka albo zamrożenie do końca klipu (Shift+F)" aria-haspopup="menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11"/><path d="m9.5 3.5 2.5 2 2.5-2M9.5 20.5l2.5-2 2.5 2"/></svg>Zamroź
+    </button>
     <button class="tool" id="btnDelete" title="Usuń zaznaczone (Delete)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Usuń
     </button>
@@ -237,7 +252,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12M12 8l4 4-4 4M20 5v14"/></svg><span class="tl-lbl">Usuń z zsunięciem</span>
     </button>
     <button class="tool" id="btnLink" title="Połącz / rozłącz obraz z dźwiękiem (Ctrl+G)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>Połącz
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg><span class="tl-lbl">Połącz</span>
     </button>
     <span class="tool-sep" aria-hidden="true"></span>
     <button class="tool" id="btnMarker" title="Dodaj znacznik (M)">
@@ -250,8 +265,8 @@
     <button class="tool" id="btnMixer" title="Mikser audio — głośność i panorama ścieżek">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v18M12 3v18M18 3v18"/><rect x="4" y="13" width="4" height="3" rx="1"/><rect x="10" y="7" width="4" height="3" rx="1"/><rect x="16" y="15" width="4" height="3" rx="1"/></svg>Mikser
     </button>
-    <button class="tool rec" id="btnRecord" title="Nagraj głos z mikrofonu (Shift+R)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Nagraj
+    <button class="tool rec" id="btnRecord" title="Nagraj głos z mikrofonu (Shift+R)" aria-label="Nagraj głos z mikrofonu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
     </button>
     <button class="tool pro" id="btnPro" aria-haspopup="menu" title="Narzędzia Pro: napisy AI, usuwanie ciszy, wykrywanie scen i rytmu, ściszanie muzyki pod głosem">✦ Pro</button>
     <span class="tool-sep" aria-hidden="true"></span>
@@ -311,6 +326,8 @@
   <p class="hint" id="expStatus" aria-live="polite"></p>
   <div class="dlg-actions">
     <button type="button" class="btn" id="expCancel">Anuluj</button>
+    <button type="button" class="btn yt-btn" id="expYt" title="Eksportuj do MP4 i wyślij na swój kanał YouTube">
+      <svg class="yt-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12a31 31 0 0 0 .5 4.8 3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1c.4-1.6.5-3.2.5-4.8s-.1-3.2-.5-4.8z"/><path class="yt-play" d="m9.75 15.02 5.75-3.02-5.75-3.02z"/></svg>Wyślij na YouTube</button>
     <button type="button" class="btn primary" id="expStart">Eksportuj</button>
   </div>
 </dialog>
@@ -440,6 +457,39 @@
           </div>
         </fieldset>
         <p class="gh-result" id="ghResult" role="status"></p>
+      </form>
+    </section>
+    <section class="set-gh" id="setYoutube" aria-labelledby="ytSetTitle">
+      <h3 class="set-h gh-h" id="ytSetTitle"><svg class="yt-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12a31 31 0 0 0 .5 4.8 3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1c.4-1.6.5-3.2.5-4.8s-.1-3.2-.5-4.8z"/><path class="yt-play" d="m9.75 15.02 5.75-3.02-5.75-3.02z"/></svg> YouTube — wysyłanie filmów prosto z CloudCut</h3>
+      <p class="hint">Po połączeniu w oknie Eksportu pojawi się „Wyślij na YouTube”: tytuł, opis, tagi, miniatura, widoczność i „dla dzieci” — bez wchodzenia na stronę YouTube.</p>
+      <div class="gh-account yt-account" id="ytAccount" hidden></div>
+      <details class="yt-guide">
+        <summary>Jak zdobyć Client ID i Client secret (jednorazowo, ok. 5 minut)</summary>
+        <ol>
+          <li>Otwórz <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud ↗</a> i utwórz projekt, np. „CloudCut”.</li>
+          <li>Włącz <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">YouTube Data API v3 ↗</a> (przycisk „Włącz”).</li>
+          <li>W <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">ekranie zgody OAuth ↗</a> wybierz „Zewnętrzni”, wpisz nazwę i swój e-mail, a w „Odbiorcy” → „Użytkownicy testowi” dodaj swój adres Gmail (ten od kanału).</li>
+          <li>W <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Dane logowania ↗</a> kliknij „Utwórz dane logowania” → „Identyfikator klienta OAuth” → typ <b>„Aplikacja komputerowa”</b> → Utwórz.</li>
+          <li>Skopiuj Client ID i Client secret, wklej poniżej, kliknij „Zapisz”, a potem „Połącz z YouTube”.</li>
+        </ol>
+        <p class="hint">Google każe takim aplikacjom w trybie testowym łączyć się ponownie co 7 dni, a filmy z projektów bez audytu YouTube publikuje jako prywatne (widoczność zmienisz w YouTube Studio). Adres powrotu dla programu: <code id="ytRedirect"></code></p>
+      </details>
+      <form id="ytForm" novalidate>
+        <fieldset id="ytFields">
+          <div class="gh-grid">
+            <div class="field"><label for="ytClientId">Client ID</label><input type="text" id="ytClientId" spellcheck="false" autocomplete="off"></div>
+            <div class="field"><label for="ytSecret">Client secret</label>
+              <div class="pass-wrap"><input id="ytSecret" type="password" spellcheck="false" autocomplete="off">
+                <button type="button" class="icon-btn" id="ytSecretShow" aria-label="Pokaż Client secret" aria-pressed="false" title="Pokaż">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+          </div>
+          <div class="gh-actions">
+            <button type="submit" class="btn small">Zapisz</button>
+            <button type="button" class="btn primary small yt-btn" id="ytConnect" hidden>Połącz z YouTube</button>
+            <button type="button" class="btn small danger" id="ytDisconnect" hidden>Odłącz YouTube</button>
+          </div>
+        </fieldset>
+        <p class="gh-result" id="ytResult" role="status"></p>
       </form>
     </section>
     <section class="set-gh" id="setUpdates" aria-labelledby="updTitle">
@@ -727,6 +777,7 @@
 <script src="js/library.js"></script>
 <script src="js/record.js"></script>
 <script src="js/scopes.js"></script>
+<script src="js/youtube.js"></script>
 <script src="js/keys.js"></script>
 </body>
 </html>

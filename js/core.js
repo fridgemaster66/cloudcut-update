@@ -212,7 +212,27 @@ function clipLabel(c) {
 }
 
 /* ---------------- Klatki kluczowe ---------------- */
-const KF_PROPS = ['opacity', 'scale', 'x', 'y', 'rotation', 'volume'];
+const KF_PROPS = ['opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'size', 'spacing'];
+/* Właściwości tekstowe też mogą się animować: kolor płynnie przechodzi, treść napisu zmienia się skokowo */
+const KF_STR = ['text', 'color'];
+const KF_EXTRA = ['size', 'spacing', 'text', 'color']; // rysowanie bierze je z klatek kluczowych (animProps)
+/* Tryb animacji (jak nagrywanie klatek w After Effects): każda zmiana właściwości zapisuje się w miejscu głowicy */
+let animMode = false;
+const canAnimate = (c, name) => (KF_PROPS.includes(name) || KF_STR.includes(name)) && c.props[name] !== undefined && !(name === 'color' && c.kind !== 'text');
+function mixHexColor(a, b, p) {
+  const A = hexRgb(a), B = hexRgb(b);
+  return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * p).toString(16).padStart(2, '0')).join('');
+}
+function animProps(c, local) {
+  let P = c.props;
+  for (const n of KF_EXTRA) {
+    const k = c.kf?.[n];
+    if (!k?.length) continue;
+    if (P === c.props) P = { ...c.props };
+    P[n] = kfValue(k, local, c.props.kfEase);
+  }
+  return P;
+}
 const smooth = p => p * p * (3 - 2 * p);
 /* Wygładzanie ruchu między klatkami kluczowymi */
 const EASINGS = {
@@ -232,7 +252,12 @@ function kfValue(k, t, ease = 'smooth') {
   const f = EASINGS[ease] || smooth;
   for (let i = 0; i < k.length - 1; i++) {
     const a = k[i], b = k[i + 1];
-    if (t < b.t) return a.v + (b.v - a.v) * f((t - a.t) / Math.max(EPS, b.t - a.t));
+    if (t < b.t) {
+      if (typeof a.v === 'number') return a.v + (b.v - a.v) * f((t - a.t) / Math.max(EPS, b.t - a.t));
+      // kolor: płynne przejście; inny tekst: zmiana dopiero w następnej klatce kluczowej
+      const isHex = v => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+      return isHex(a.v) && isHex(b.v) && ease !== 'hold' ? mixHexColor(a.v, b.v, clamp(f((t - a.t) / Math.max(EPS, b.t - a.t)), 0, 1)) : a.v;
+    }
   }
   return last.v;
 }
@@ -248,10 +273,17 @@ function kfIndexAt(c, name, local) {
   return k ? k.findIndex(f => Math.abs(f.t - local) < frame() / 2) : -1;
 }
 function setProp(c, name, v) {
-  if (KF_PROPS.includes(name) && hasKf(c, name)) {
+  const animatable = KF_PROPS.includes(name) || KF_STR.includes(name);
+  const onClip = playhead >= c.start - EPS && playhead <= clipEnd(c) + EPS;
+  if (animatable && hasKf(c, name)) {
     const local = snapLocal(c), k = c.kf[name], i = kfIndexAt(c, name, local);
     if (i >= 0) k[i].v = v;
     else { k.push({ t: local, v }); k.sort((a, b) => a.t - b.t); }
+  } else if (animMode && onClip && canAnimate(c, name)) {
+    // pierwsza zmiana w trybie animacji: dotychczasowa wartość zostaje na początku klipu, nowa — w miejscu głowicy
+    const local = snapLocal(c), old = c.props[name];
+    c.kf ??= {};
+    c.kf[name] = local > frame() / 2 && old !== v ? [{ t: 0, v: old }, { t: local, v }] : [{ t: local, v }];
   } else setPath(c.props, name, v);
 }
 function toggleKf(c, name) {

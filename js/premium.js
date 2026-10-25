@@ -204,6 +204,99 @@ function gpuEffects(src, sx, sy, cw, ch, P, t = 0) {
 }
 
 /* =========================================================
+   Pędzel kluczowania: malujesz tło na podglądzie, program dobiera kolor i tolerancję
+   ========================================================= */
+const keyBrush = { on: false, clipId: null, img: null, samples: [], pts: [], radius: 22 };
+function startKeyBrush(c) {
+  if (!c || !['video', 'image'].includes(c.kind)) return;
+  if (playhead < c.start - EPS || playhead >= clipEnd(c)) { toast('Ustaw głowicę na tym klipie — pędzel czyta bieżącą klatkę'); return; }
+  const m = media.get(c.mediaId);
+  const src = c.kind === 'video' ? getPlayer(c).el : m?.img;
+  const sw = c.kind === 'video' ? src?.videoWidth : m?.w, sh = c.kind === 'video' ? src?.videoHeight : m?.h;
+  if (!src || !sw) { toast('Klatka jeszcze się wczytuje — spróbuj za chwilę'); return; }
+  // surowa klatka pliku (bez kluczowania, LUT-ów i filtrów) — z niej bierzemy kolory tła
+  const k = Math.min(1, 1280 / sw), cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(sw * k)); cv.height = Math.max(1, Math.round(sh * k));
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  g.drawImage(src, 0, 0, cv.width, cv.height);
+  keyBrush.img = { data: g.getImageData(0, 0, cv.width, cv.height).data, w: cv.width, h: cv.height };
+  Object.assign(keyBrush, { on: true, clipId: c.id, samples: [], pts: [] });
+  if (!c.props.key.on) { c.props.key.on = true; drawFrame(); } // od razu widać efekt kolejnych pociągnięć
+  overlay.classList.add('key-brush');
+  renderInspector();
+  toast('Pomaluj tło na podglądzie (przytrzymaj i przeciągnij). Kilka pociągnięć = dokładniej. Esc kończy.', 5000);
+}
+function stopKeyBrush() {
+  if (!keyBrush.on) return;
+  Object.assign(keyBrush, { on: false, clipId: null, img: null, samples: [], pts: [] });
+  overlay.classList.remove('key-brush');
+  drawOverlay();
+  renderInspector();
+}
+function drawKeyBrush(g) {
+  g.save();
+  g.fillStyle = 'rgba(47,191,113,.35)';
+  for (const p of keyBrush.pts) { g.beginPath(); g.arc(p.x, p.y, p.r, 0, Math.PI * 2); g.fill(); }
+  g.restore();
+}
+/* Punkt podglądu → piksele surowej klatki pod pędzlem */
+function keyBrushSample(p) {
+  const c = clipById(keyBrush.clipId), b = previewBoxes.find(x => x.id === keyBrush.clipId);
+  if (!c || !b || !keyBrush.img) return;
+  const l = boxLocal(b, p);
+  let fx = l.x / b.w + 0.5, fy = l.y / b.h + 0.5;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
+  const P = c.props, cr = P.crop || { l: 0, r: 0, t: 0, b: 0 };
+  if (P.flipH) fx = 1 - fx;
+  if (P.flipV) fy = 1 - fy;
+  const { data, w, h } = keyBrush.img;
+  const cx = (cr.l + fx * (100 - cr.l - cr.r)) / 100 * w, cy = (cr.t + fy * (100 - cr.t - cr.b)) / 100 * h;
+  const rad = Math.max(1, keyBrush.radius * p.k * w * (100 - cr.l - cr.r) / 100 / b.w);
+  const step = Math.max(1, rad / 3);
+  for (let dy = -rad; dy <= rad; dy += step) for (let dx = -rad; dx <= rad; dx += step) {
+    if (dx * dx + dy * dy > rad * rad) continue;
+    const x = Math.round(cx + dx), y = Math.round(cy + dy);
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const i = (y * w + x) * 4;
+    keyBrush.samples.push([data[i], data[i + 1], data[i + 2]]);
+  }
+  keyBrush.pts.push({ x: p.x, y: p.y, r: keyBrush.radius * p.k });
+}
+function keyBrushStroke(e) {
+  try { overlay.setPointerCapture(e.pointerId); } catch { /* np. pióro bez przechwytywania — maluje się i tak */ }
+  const move = ev => { keyBrushSample(toProject(ev)); drawOverlay(); };
+  const up = () => {
+    overlay.removeEventListener('pointermove', move);
+    overlay.removeEventListener('pointerup', up);
+    overlay.removeEventListener('pointercancel', up);
+    applyKeyBrush();
+  };
+  overlay.addEventListener('pointermove', move);
+  overlay.addEventListener('pointerup', up);
+  overlay.addEventListener('pointercancel', up);
+  move(e);
+}
+/* Kolor tła = średnia próbek blisko mediany barwy (CbCr), tolerancja tak, by objęła 95% zamalowanych pikseli */
+function applyKeyBrush() {
+  const c = clipById(keyBrush.clipId), S = keyBrush.samples;
+  if (!c) { stopKeyBrush(); return; }
+  if (S.length < 4) { toast('Pędzel trafił obok obrazu — maluj po tle klipu'); return; }
+  const cbcr = ([r, g, b]) => [-0.1687 * r - 0.3313 * g + 0.5 * b, 0.5 * r - 0.4187 * g - 0.0813 * b];
+  const C = S.map(cbcr), med = i => { const v = C.map(x => x[i]).sort((a, b) => a - b); return v[v.length >> 1]; };
+  const m0 = [med(0), med(1)];
+  const d = C.map(x => Math.hypot(x[0] - m0[0], x[1] - m0[1]));
+  const lim = [...d].sort((a, b) => a - b)[Math.floor(0.95 * (d.length - 1))];
+  const ins = S.filter((_, i) => d[i] <= lim);
+  const avg = [0, 1, 2].map(k => Math.round(ins.reduce((a, s) => a + s[k], 0) / ins.length));
+  const tol = clamp(Math.round(lim / 1.3 + 4), 5, 90);
+  c.props.key = { ...c.props.key, on: true, color: '#' + avg.map(v => v.toString(16).padStart(2, '0')).join(''), tol, soft: clamp(Math.round(tol * 0.5), 6, 40) };
+  commit();
+  drawFrame();
+  renderInspector();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && keyBrush.on) { e.preventDefault(); e.stopPropagation(); stopKeyBrush(); } }, true);
+
+/* =========================================================
    Mikser audio
    ========================================================= */
 let mixerDlg = null, mixerTimer = null;

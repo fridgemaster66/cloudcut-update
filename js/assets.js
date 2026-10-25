@@ -50,6 +50,11 @@ const SFX_DEFS = [
   ['pop', 'Pyk'], ['click', 'Klik'], ['ding', 'Dzwonek'], ['notify', 'Powiadomienie'], ['coin', 'Moneta'],
   ['typing', 'Pisanie na klawiaturze'], ['shutter', 'Migawka aparatu'], ['heartbeat', 'Bicie serca'],
   ['applause', 'Brawa'], ['glitch', 'Zakłócenia'], ['error', 'Błąd'], ['tada', 'Ta-da!'],
+  ['boom', 'Kinowy huk (boom)'], ['swipe', 'Szybki przeskok (swipe)'], ['rewind', 'Przewijanie taśmy'], ['laser', 'Laser'], ['boing', 'Sprężyna (boing)'],
+  ['drumroll', 'Werbel (fanfara)'], ['crash', 'Talerz perkusyjny'], ['sparkle', 'Magiczny błysk'], ['kaching', 'Kasa (ka-ching)'], ['knock', 'Pukanie'],
+  ['thunder', 'Grzmot'], ['wind', 'Wiatr'], ['siren', 'Syrena'], ['phone', 'Dzwonek telefonu'], ['countdown', 'Odliczanie (pip-pip-piip)'],
+  ['buzzer', 'Zła odpowiedź'], ['correct', 'Dobra odpowiedź'], ['jump', 'Skok (8-bit)'], ['powerup', 'Bonus (8-bit)'], ['scratch', 'Scratch płyty'],
+  ['slideup', 'Gwizdek w górę'], ['slidedown', 'Gwizdek w dół'], ['tick', 'Tykanie zegara'], ['drop', 'Kropla wody'], ['bubble', 'Bąbelki'],
 ];
 const TEMPLATE_DEFS = [
   { id: 'intro', name: 'Intro z tytułem', dur: 5, desc: 'Tło, tytuł i prześwietlenie' },
@@ -168,7 +173,9 @@ function applyTemplate(id, t) {
 /* ---------------- Efekty dźwiękowe z syntezatora ---------------- */
 async function synthSfx(kind) {
   const sr = 44100;
-  const durs = { whoosh: 1, riser: 2.5, impact: 1.6, bassdrop: 1.8, pop: 0.2, click: 0.08, ding: 1.8, notify: 0.7, coin: 0.5, typing: 1.6, shutter: 0.35, heartbeat: 2.6, applause: 3.5, glitch: 0.8, error: 0.5, tada: 1.6 };
+  const durs = { whoosh: 1, riser: 2.5, impact: 1.6, bassdrop: 1.8, pop: 0.2, click: 0.08, ding: 1.8, notify: 0.7, coin: 0.5, typing: 1.6, shutter: 0.35, heartbeat: 2.6, applause: 3.5, glitch: 0.8, error: 0.5, tada: 1.6,
+    boom: 3, swipe: 0.45, rewind: 1.4, laser: 0.5, boing: 0.9, drumroll: 2.6, crash: 3, sparkle: 1.6, kaching: 1.4, knock: 1, thunder: 4, wind: 4, siren: 3, phone: 2.4,
+    countdown: 3.4, buzzer: 0.9, correct: 0.8, jump: 0.35, powerup: 0.9, scratch: 0.7, slideup: 0.8, slidedown: 0.8, tick: 3, drop: 0.5, bubble: 1.4 };
   const dur = durs[kind] || 1;
   const ac = new OfflineAudioContext(2, Math.ceil(sr * dur), sr);
   const out = ac.createGain(); out.gain.value = 0.8; out.connect(ac.destination);
@@ -200,6 +207,31 @@ async function synthSfx(kind) {
     case 'glitch': { let t = 0; while (t < 0.75) { const len = 0.03 + Math.random() * 0.06; tone('square', 80 + Math.random() * 1600, 80 + Math.random() * 1600, t, len, 0.25, 0.001); t += len; } break; }
     case 'error': tone('sawtooth', 110, 105, 0, 0.18, 0.4); tone('sawtooth', 98, 92, 0.22, 0.22, 0.4); break;
     case 'tada': [523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, i * 0.09, 1.2 - i * 0.09, 0.3, 0.004)); break;
+    case 'boom': { tone('sine', 70, 28, 0, 2.6, 1, 0.004); const n = noise(2.8), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'lowpass'; f.frequency.setValueAtTime(900, 0); f.frequency.exponentialRampToValueAtTime(80, 2.6); env(g, 0, 0.004, 0.9, 2.6); n.connect(f).connect(g).connect(out); n.start(); break; }
+    case 'swipe': { const n = noise(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.Q.value = 2; f.frequency.setValueAtTime(5000, 0); f.frequency.exponentialRampToValueAtTime(400, 0.4); env(g, 0, 0.02, 0.9, 0.38); n.connect(f).connect(g).connect(out); n.start(); break; }
+    case 'rewind': { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(200, 0); o.frequency.exponentialRampToValueAtTime(2400, 1.2); const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 26; lg.gain.value = 120; lfo.connect(lg).connect(o.frequency); env(g, 0, 0.05, 0.22, 1.3); o.connect(g).connect(out); o.start(); lfo.start(); o.stop(1.4); lfo.stop(1.4); break; }
+    case 'laser': tone('square', 2400, 180, 0, 0.45, 0.25, 0.002); break;
+    case 'boing': { const o = ac.createOscillator(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain(); o.type = 'triangle'; o.frequency.value = 330; lfo.frequency.setValueAtTime(18, 0); lfo.frequency.exponentialRampToValueAtTime(4, 0.85); lg.gain.setValueAtTime(140, 0); lg.gain.exponentialRampToValueAtTime(5, 0.85); lfo.connect(lg).connect(o.frequency); env(g, 0, 0.004, 0.6, 0.85); o.connect(g).connect(out); o.start(); lfo.start(); o.stop(0.9); lfo.stop(0.9); break; }
+    case 'drumroll': { let t = 0; while (t < 2.1) { const n = noise(0.05), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.frequency.value = 1800; env(g, t, 0.001, 0.25 + t * 0.2, 0.05); n.connect(f).connect(g).connect(out); n.start(t); t += 0.045; } tone('sine', 180, 60, 2.15, 0.4, 0.9, 0.002); const n = noise(0.5), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'highpass'; f.frequency.value = 3000; env(g, 2.15, 0.002, 0.7, 0.45); n.connect(f).connect(g).connect(out); n.start(2.15); break; }
+    case 'crash': { const n = noise(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'highpass'; f.frequency.value = 4500; env(g, 0, 0.002, 0.8, 2.9); n.connect(f).connect(g).connect(out); n.start(); break; }
+    case 'sparkle': for (let i = 0; i < 9; i++) { const f = 1800 + Math.random() * 3000; tone('sine', f, f * 1.02, i * 0.11, 0.6, 0.18, 0.002); } break;
+    case 'kaching': { tone('square', 2093, 2093, 0, 0.07, 0.2); tone('square', 2637, 2637, 0.07, 0.07, 0.2); for (const [f, a] of [[3520, 0.3], [5274, 0.15]]) tone('sine', f, f, 0.16, 1.2, a, 0.002); const n = noise(0.15), fl = ac.createBiquadFilter(), g = ac.createGain(); fl.type = 'bandpass'; fl.frequency.value = 900; env(g, 0, 0.002, 0.5, 0.12); n.connect(fl).connect(g).connect(out); n.start(); break; }
+    case 'knock': for (const t0 of [0, 0.22, 0.44]) { tone('sine', 190, 110, t0, 0.09, 0.9, 0.001); const n = noise(0.05), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'lowpass'; f.frequency.value = 1200; env(g, t0, 0.001, 0.5, 0.04); n.connect(f).connect(g).connect(out); n.start(t0); } break;
+    case 'thunder': { const n = noise(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'lowpass'; f.frequency.value = 260; g.gain.setValueAtTime(0, 0); for (let t = 0; t < 3.9; t += 0.05) g.gain.setValueAtTime(Math.min(1, (t < 0.15 ? t / 0.15 : Math.exp(-(t - 0.15) * 0.9)) * (0.55 + Math.random() * 0.45)), t); n.connect(f).connect(g).connect(out); n.start(); tone('sine', 50, 30, 0, 2.5, 0.6, 0.02); break; }
+    case 'wind': { const n = noise(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.Q.value = 3; f.frequency.setValueAtTime(400, 0); for (let t = 0.5; t < 4; t += 0.5) f.frequency.linearRampToValueAtTime(300 + Math.random() * 900, t); g.gain.setValueAtTime(0.0001, 0); g.gain.exponentialRampToValueAtTime(0.7, 1); g.gain.setValueAtTime(0.7, 3.2); g.gain.exponentialRampToValueAtTime(0.0001, 3.95); n.connect(f).connect(g).connect(out); n.start(); break; }
+    case 'siren': { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; for (let i = 0; i < 6; i++) { o.frequency.setValueAtTime(i % 2 ? 950 : 650, i * 0.5); o.frequency.linearRampToValueAtTime(i % 2 ? 650 : 950, i * 0.5 + 0.5); } const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2500; env(g, 0, 0.05, 0.25, 2.9); o.connect(lp).connect(g).connect(out); o.start(); o.stop(3); break; }
+    case 'phone': for (const t0 of [0, 1.2]) for (let k = 0; k < 20; k++) { tone('sine', 1300, 1300, t0 + k * 0.05, 0.04, 0.25, 0.001); tone('sine', 1650, 1650, t0 + k * 0.05, 0.04, 0.2, 0.001); } break;
+    case 'countdown': for (const [t0, f, len] of [[0, 880, 0.15], [1, 880, 0.15], [2, 1760, 0.9]]) tone('sine', f, f, t0, len, 0.5, 0.003); break;
+    case 'buzzer': tone('sawtooth', 140, 130, 0, 0.75, 0.35, 0.005); tone('square', 147, 140, 0, 0.75, 0.2, 0.005); break;
+    case 'correct': tone('sine', 784, 784, 0, 0.15, 0.45); tone('sine', 1175, 1175, 0.14, 0.55, 0.45); break;
+    case 'jump': tone('square', 300, 900, 0, 0.3, 0.22, 0.002); break;
+    case 'powerup': [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone('square', f, f, i * 0.07, 0.12, 0.18, 0.002)); break;
+    case 'scratch': { const n = noise(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.Q.value = 4; f.frequency.setValueAtTime(600, 0); f.frequency.linearRampToValueAtTime(2200, 0.15); f.frequency.linearRampToValueAtTime(500, 0.35); f.frequency.linearRampToValueAtTime(1800, 0.5); f.frequency.linearRampToValueAtTime(400, 0.68); env(g, 0, 0.01, 0.9, 0.65); n.connect(f).connect(g).connect(out); n.start(); break; }
+    case 'slideup': tone('sine', 400, 2000, 0, 0.7, 0.4, 0.02); break;
+    case 'slidedown': tone('sine', 2000, 350, 0, 0.7, 0.4, 0.02); break;
+    case 'tick': for (let i = 0; i < 6; i++) { const f = i % 2 ? 2200 : 2600; tone('square', f, f, i * 0.5, 0.012, 0.3, 0.001); } break;
+    case 'drop': tone('sine', 600, 1700, 0, 0.12, 0.6, 0.002); tone('sine', 1500, 900, 0.1, 0.25, 0.25, 0.002); break;
+    case 'bubble': for (let i = 0; i < 10; i++) { const f = 300 + Math.random() * 500, t0 = i * 0.12 + Math.random() * 0.05; tone('sine', f, f * 2.6, t0, 0.08, 0.35, 0.002); } break;
   }
   return ac.startRendering();
 }
@@ -336,6 +368,7 @@ async function loadUserAssets() {
   registerUserFonts(); // czcionki z Biblioteki → wybór czcionek we wszystkich projektach
   renderAssets();
   if (isHomeOpen() && homeView === 'library') renderLibrary();
+  renderEditorLibrary(); // zakładka Biblioteka w edytorze
 }
 function myAssetPreview(a) {
   if (a.kind === 'font') return `<div class="ap-text" style="font-family:'${esc(a.data?.family || a.name)}',sans-serif">Aa Ąą</div>`;

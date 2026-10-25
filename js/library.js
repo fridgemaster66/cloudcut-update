@@ -344,3 +344,47 @@ async function libDropItems(dt, folder) {
     libDropItems(e.dataTransfer, t?.classList.contains('lib-folder') ? t.dataset.folderdrop : libFolder);
   });
 }
+
+/* ---------- Biblioteka w edytorze (zakładka obok Mediów) ----------
+   Te same foldery co w menu głównym; kliknięcie wstawia plik w miejscu głowicy, przeciągnięcie — tam, gdzie upuścisz */
+let elibFolder = null;
+function renderEditorLibrary() {
+  const list = $('#elibList');
+  if (!list) return;
+  if (elibFolder && !libFolderById(elibFolder)) elibFolder = null;
+  const q = $('#elibSearch').value.trim().toLowerCase();
+  const path = libFolderPath(elibFolder);
+  $('#elibPath').innerHTML = q ? '<span class="lib-crumb-note">Wyniki ze wszystkich folderów</span>'
+    : [`<button type="button" class="lib-crumb" data-egoto=""${elibFolder ? '' : ' aria-current="location"'}>Biblioteka</button>`,
+      ...path.map((f, i) => `<button type="button" class="lib-crumb" data-egoto="${f.id}"${i === path.length - 1 ? ' aria-current="location"' : ''}>${esc(f.name)}</button>`)].join('<span class="lib-sep" aria-hidden="true">›</span>');
+  const folders = q ? [] : libChildFolders(elibFolder);
+  const files = userAssets.filter(a => (q ? a.name.toLowerCase().includes(q) : libFolderOf(a) === elibFolder));
+  const what = a => ({ font: 'czcionka — kliknij, żeby użyć w napisie', lut: 'LUT — nałoży się na zaznaczone klipy', style: a.kind === 'look' ? 'zestaw kolorów — na zaznaczone klipy' : 'styl klipu' }[libKind(a)] || 'kliknij albo przeciągnij na oś czasu');
+  list.innerHTML = folders.length || files.length ? `<div class="preset-grid">${folders.map(f => `<div class="p-card a-card elib-folder" data-egoto="${f.id}" tabindex="0" role="button" title="Otwórz folder ${esc(f.name)}">
+        <div class="p-prev a-prev elib-fprev">${FOLDER_SVG}</div><span class="p-name">${esc(f.name)}</span></div>`).join('')}${files.map(a => `<div class="p-card a-card" draggable="true" data-asset="my:${a.id}" tabindex="0" role="button" title="${esc(a.name)} — ${what(a)}">
+        <div class="p-prev a-prev">${libKind(a) === 'font' ? `<div class="ap-text" style="font-family:'${esc(a.data?.family || a.name)}',sans-serif">Aa Ąą</div>` : myAssetPreview(a)}</div>
+        <span class="p-name">${esc(a.name)}</span></div>`).join('')}</div>`
+    : `<p class="panel-hint">${q ? 'Nic nie pasuje do wyszukiwania.' : userAssets.length || libFolders.length ? 'Ten folder jest pusty.' : 'Biblioteka jest pusta. Kliknij „Zarządzaj”, żeby dodać pliki i całe foldery — będą w każdym projekcie.'}</p>`;
+}
+$('#elibSearch').addEventListener('input', renderEditorLibrary);
+$('#elibManage').addEventListener('click', () => { libFolder = elibFolder; showHome('list', 'library'); });
+$('#elibPath').addEventListener('click', e => { const b = e.target.closest('[data-egoto]'); if (b) { elibFolder = b.dataset.egoto || null; renderEditorLibrary(); } });
+$('#elibList').addEventListener('click', e => {
+  const f = e.target.closest('[data-egoto]');
+  if (f) { elibFolder = f.dataset.egoto; renderEditorLibrary(); $('#elibPath [aria-current]')?.focus(); return; }
+  const card = e.target.closest('[data-asset]');
+  if (card) useAsset(card.dataset.asset);
+});
+$('#elibList').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target.closest('[data-egoto], [data-asset]');
+  if (!t || t !== e.target) return;
+  e.preventDefault(); e.stopPropagation();
+  t.click();
+});
+$('#elibList').addEventListener('dragstart', e => {
+  const card = e.target.closest('[data-asset]');
+  if (!card) return;
+  e.dataTransfer.setData('text/x-kadr-asset', card.dataset.asset);
+  e.dataTransfer.effectAllowed = 'copy';
+});

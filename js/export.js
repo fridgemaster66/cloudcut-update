@@ -212,7 +212,7 @@ async function openExport() {
   if (!expDlg.open) expDlg.showModal();
 }
 function setExpForm(on) {
-  for (const id of ['#expFmt', '#expRange', '#expQuality', '#expComp', '#expLoud']) $(id).disabled = !on;
+  for (const id of ['#expFmt', '#expRange', '#expQuality', '#expComp', '#expLoud', '#expYt']) $(id).disabled = !on;
   $('#expFps').disabled = !on || kindOfFormat(FMT_BY_ID.get($('#expFmt').value)) !== 'video';
   $('#expStart').disabled = !on;
   if (on) updateExpInfo();
@@ -246,6 +246,7 @@ function etaText(t0, p) {
 }
 function exportName(ext) { return `${safeName($('#projName').value)}.${ext}`; }
 function finishWith(blob, name) {
+  if (typeof ytPending !== 'undefined' && ytPending && /^video\//.test(blob.type || 'video/')) { ytFinish(blob, name); return; }
   downloadBlob(blob, name);
   progress(1, `Gotowe — zapisano „${name}” (${(blob.size / 1048576).toFixed(1)} MB). Plik jest w folderze Pobrane.`);
 }
@@ -880,6 +881,7 @@ $('#expStart').addEventListener('click', async () => {
 });
 
 function endExport(prevHead) {
+  if (typeof ytPending !== 'undefined') ytPending = null; // przerwany eksport nie wysyła niczego przy następnym
   const ex = exporting;
   exporting = null;
   if (ex) loopOn = ex.prevLoop;

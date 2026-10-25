@@ -97,8 +97,8 @@ function syncBuses() {
 }
 
 /* Efekty dźwięku klipu: korektor, głos, kompresor, usuwanie buczenia, oczyszczanie */
-const AFX0 = { bass: 0, mid: 0, treble: 0, voice: false, comp: false, hum: false, clean: false };
-const afxSig = a => (a ? [a.bass, a.mid, a.treble, a.voice, a.comp, a.hum, a.clean].join('|') : '');
+const AFX0 = { bass: 0, mid: 0, treble: 0, voice: false, comp: false, hum: false, clean: false, voicefx: 'none', reverb: 0, echo: 0 };
+const afxSig = a => (a ? [a.bass, a.mid, a.treble, a.voice, a.comp, a.hum, a.clean, a.voicefx, a.reverb, a.echo].join('|') : '');
 function buildAudioFx(ac, a) {
   const nodes = [];
   const add = n => { if (nodes.length) nodes[nodes.length - 1].connect(n); nodes.push(n); return n; };
@@ -114,6 +114,43 @@ function buildAudioFx(ac, a) {
     c.threshold.value = a.voice ? -26 : -22; c.knee.value = 12; c.ratio.value = 4; c.attack.value = 0.005; c.release.value = 0.2;
     add(c);
     const makeup = ac.createGain(); makeup.gain.value = a.voice ? 1.6 : 1.35; add(makeup);
+  }
+  // efekty głosu (barwa) — filtry i zniekształcenie, a robot to modulacja pierścieniowa
+  const vf = a?.voicefx;
+  if (vf && vf !== 'none') {
+    const bq = (type, f, q = 0.7, g = 0) => { const n = ac.createBiquadFilter(); n.type = type; n.frequency.value = f; n.Q.value = q; n.gain.value = g; return add(n); };
+    const drive = k => { const w = ac.createWaveShaper(), cu = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; cu[i] = Math.tanh(k * x) / Math.tanh(k); } w.curve = cu; return add(w); };
+    if (vf === 'phone') { bq('highpass', 450); bq('lowpass', 3200); drive(2.2); }
+    else if (vf === 'radio') { bq('highpass', 320); bq('peaking', 1400, 0.9, 6); bq('lowpass', 4200); drive(3); }
+    else if (vf === 'underwater') { bq('lowpass', 480, 3); bq('peaking', 220, 1, 5); }
+    else if (vf === 'megaphone') { bq('highpass', 650); bq('peaking', 2200, 1.2, 9); bq('lowpass', 5000); drive(5); }
+    else if (vf === 'robot') {
+      const rm = ac.createGain(); rm.gain.value = 0;
+      const o = ac.createOscillator(); o.frequency.value = 55; o.connect(rm.gain); o.start(0);
+      add(rm); bq('highpass', 120);
+    }
+  }
+  // echo i pogłos: osobne gałęzie (sucha + mokra) sklejane w jednym węźle wyjściowym
+  const branch = (wetNode, mix) => {
+    const inG = ac.createGain(), dry = ac.createGain(), wet = ac.createGain(), out = ac.createGain();
+    dry.gain.value = 1 - mix * 0.45; wet.gain.value = mix;
+    inG.connect(dry).connect(out);
+    inG.connect(wetNode.input); wetNode.output.connect(wet).connect(out);
+    if (nodes.length) nodes[nodes.length - 1].connect(inG);
+    nodes.push(inG, out);
+  };
+  if (a?.echo > 0) {
+    const d = ac.createDelay(2), fb = ac.createGain();
+    d.delayTime.value = 0.32; fb.gain.value = 0.25 + a.echo / 100 * 0.4;
+    d.connect(fb).connect(d);
+    branch({ input: d, output: d }, a.echo / 100 * 0.7);
+  }
+  if (a?.reverb > 0) {
+    const conv = ac.createConvolver(), sec = 0.6 + a.reverb / 100 * 2.6, len = Math.ceil(ac.sampleRate * sec);
+    const ir = ac.createBuffer(2, len, ac.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    conv.buffer = ir;
+    branch({ input: conv, output: conv }, a.reverb / 100 * 0.8);
   }
   if (!nodes.length) { const g = ac.createGain(); nodes.push(g); }
   return { input: nodes[0], output: nodes[nodes.length - 1] };
@@ -806,9 +843,9 @@ function shakeAt(s, t, id) {
   return { dx: wiggleNoise(f, seed + 1) * a, dy: wiggleNoise(f, seed + 2) * a, rot: wiggleNoise(f, seed + 3) * (s.rot || 0) / 100 * 6 };
 }
 function drawVisual(c, t, tailMode, trans) {
-  const P = c.props;
-  const W = state.w, H = state.h;
   const local = clamp(t - c.start, 0, c.dur);
+  const P = animProps(c, local); // rozmiar, odstęp, kolor i treść napisu mogą mieć klatki kluczowe
+  const W = state.w, H = state.h;
   let alpha = pv(c, 'opacity', local);
   let sc = pv(c, 'scale', local);
   let ox = pv(c, 'x', local), oy = pv(c, 'y', local);
@@ -1018,6 +1055,7 @@ function drawOverlay() {
   octx.setTransform(k, 0, 0, k, 0, 0);
   const px = (devicePixelRatio || 1) / k; // jeden piksel ekranu w jednostkach projektu
   const W = state.w, H = state.h;
+  if (typeof keyBrush !== 'undefined' && keyBrush.on) drawKeyBrush(octx);
   if (guidesOn) {
     octx.lineWidth = px;
     octx.strokeStyle = 'rgba(255,255,255,.28)';
@@ -1080,6 +1118,7 @@ overlay.addEventListener('pointermove', e => {
   overlay.className = h ? (h.mode === 'scale' ? 'can-scale' : 'can-move') : '';
 });
 overlay.addEventListener('pointerdown', e => {
+  if (typeof keyBrush !== 'undefined' && keyBrush.on && e.button === 0) { keyBrushStroke(e); return; } // pędzel kluczowania
   if (playing || e.button !== 0) return;
   const p0 = toProject(e);
   const h = hitPreview(p0);

@@ -296,6 +296,7 @@ try {
             if (is_dir($dir)) @rmdir($dir);
         }
         foreach (glob(DATA_DIR . "/github/$uid.*") ?: [] as $f) @unlink($f);
+        foreach (glob(DATA_DIR . "/youtube/$uid.*") ?: [] as $f) @unlink($f);
         db()->prepare('DELETE FROM users WHERE id = ?')->execute([$uid]);
         rememberCookie('', time() - 3600);
         $_SESSION = [];
@@ -536,6 +537,39 @@ try {
     }
 
     if ($r === 'github' || $r === 'update') $GLOBALS['ghNoWait'] = true;
+
+    if ($r === 'youtube') {
+        require_once __DIR__ . '/youtube.php';
+        $sub = $seg[1] ?? '';
+        // powrót z logowania Google otwiera się w przeglądarce systemowej — bez sesji programu, użytkownik z „state”
+        if ($sub === 'callback' && $method === 'GET') {
+            try { [$ok, $msg] = ytCallback((string) ($_GET['state'] ?? ''), (string) ($_GET['code'] ?? ''), (string) ($_GET['error'] ?? '')); }
+            catch (YtError $e) { [$ok, $msg] = [false, $e->getMessage()]; }
+            ytCallbackPage($ok, $msg);
+        }
+        $uid = userId();
+        try {
+            if ($sub === '' && $method === 'GET') out(200, ytPublic($uid));
+            if ($sub === '' && $method === 'PUT') {
+                $b = body();
+                $c = ytConfig($uid);
+                $id = trim((string) ($b['clientId'] ?? ''));
+                if (!preg_match('/^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/', $id)) fail(422, 'Client ID wygląda inaczej — kończy się na „.apps.googleusercontent.com”.');
+                $secret = trim((string) ($b['clientSecret'] ?? ''));
+                if ($id !== ($c['clientId'] ?? '')) { unset($c['refresh'], $c['access'], $c['accessExp'], $c['channel'], $c['connectedAt']); } // inny klient = nowe połączenie
+                $c['clientId'] = $id;
+                if ($secret !== '') $c['clientSecret'] = sealToken($secret);
+                if (empty($c['clientSecret'])) fail(422, 'Wklej też Client secret.');
+                ytSave($uid, $c);
+                out(200, ytPublic($uid));
+            }
+            if ($sub === 'connect' && $method === 'POST') out(200, ['url' => ytConnectUrl($uid)]);
+            if ($sub === 'token' && $method === 'POST') out(200, ytAccessToken($uid));
+            if ($sub === 'disconnect' && $method === 'POST') { ytDisconnect($uid); out(200, ytPublic($uid)); }
+        } catch (YtError $e) {
+            fail(502, $e->getMessage());
+        }
+    }
 
     if ($r === 'github') {
         require_once __DIR__ . '/github.php';

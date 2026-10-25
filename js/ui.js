@@ -384,7 +384,12 @@ function speedField(c) {
       </div>
       <p class="hint" id="spdHint">${speedHint(s)}</p>
       <div class="lbl spd-ramp-lbl">Rampa prędkości</div>
-      <div class="chips">${Object.entries(RAMPS).map(([k, r]) => `<button type="button" class="chip" data-ramp="${k}" title="Dzieli klip na odcinki z płynnie zmienianą prędkością">${r.name}</button>`).join('')}</div>
+      <div class="chips">${Object.entries(RAMPS).map(([k, r]) => `<button type="button" class="chip${k.startsWith('burst') ? ' chip-hot' : ''}" data-ramp="${k}" title="Dzieli klip na odcinki z płynnie zmienianą prędkością">${r.name}</button>`).join('')}</div>
+      <div class="row2 ramp-range">
+        <div class="field"><label for="rampLo">Najwolniej (×)</label><input type="number" id="rampLo" min="0.1" max="1" step="0.05" value="${rampPrefs().lo}"></div>
+        <div class="field"><label for="rampHi">Najszybciej (×)</label><input type="number" id="rampHi" min="1.5" max="20" step="0.5" value="${rampPrefs().hi}"></div>
+      </div>
+      <p class="hint">Najwolniej i najszybciej dotyczy czterech pierwszych ramp; „Do 10×” mają tempo gotowe.</p>
     </div>`;
 }
 function speedHint(s) {
@@ -432,7 +437,7 @@ function ctlNum(c, path, label, step = 1, kf = false) {
     <input type="number" id="${id}" data-path="${path}"${kf ? ' data-kf' : ''} data-num step="${step}" value="${Math.round(v * 100) / 100}"></div>`;
 }
 const ctlCheck = (c, path, label) => `<label class="check"><input type="checkbox" data-path="${path}"${getPath(c.props, path) ? ' checked' : ''}> ${label}</label>`;
-const ctlColor = (c, path, label) => `<div class="field"><label for="${fid(path)}">${label}</label><input type="color" id="${fid(path)}" data-path="${path}" value="${getPath(c.props, path)}"></div>`;
+const ctlColor = (c, path, label) => `<div class="field"><label for="${fid(path)}">${label}</label><input type="color" id="${fid(path)}" data-path="${path}" value="${hasKf(c, path) ? pv(c, path, localAt(c)) : getPath(c.props, path)}"></div>`;
 const ctlSelect = (c, path, label, list) => `<div class="field"><label for="${fid(path)}">${label}</label><select id="${fid(path)}" data-path="${path}">${opts(list, getPath(c.props, path))}</select></div>`;
 
 /* Gradient napisu: dowolnie wiele kolorów (przycisk „+”), każdy z położeniem 0–100% */
@@ -533,7 +538,8 @@ function clipInspector(c) {
   const m = media.get(c.mediaId);
   const kindName = { video: 'Klip wideo', audio: 'Klip audio', image: 'Obraz', text: 'Napis', color: 'Plansza' }[c.kind];
   let h = `<p class="insp-title">${esc(clipLabel(c))}</p>
-    <p class="insp-sub">${kindName} · ${esc(trackOf(c).name)} · ${tc(c.start)} → ${tc(clipEnd(c))}${c.group ? ' · połączony' : ''}</p>`;
+    <p class="insp-sub">${kindName} · ${esc(trackOf(c).name)} · ${tc(c.start)} → ${tc(clipEnd(c))}${c.group ? ' · połączony' : ''}</p>
+    ${animMode ? `<p class="anim-banner" id="animBanner">${animBannerText()}</p>` : ''}`;
 
   let clipBody = `<label class="check"><input type="checkbox" data-clip="off"${c.off ? '' : ' checked'}> Klip włączony <kbd>${keyLabel('toggleOff')}</kbd></label>
     ${c.kind !== 'text' ? `<div class="field"><label for="c-name">Nazwa</label><input type="text" id="c-name" data-clip="name" value="${esc(c.name || '')}"></div>` : ''}
@@ -546,15 +552,15 @@ function clipInspector(c) {
 
   if (c.kind === 'text') {
     h += sec('text', 'Tekst', `
-      <div class="field"><label for="p-text">Treść</label><textarea id="p-text" data-path="text" rows="3">${esc(P.text)}</textarea></div>
+      <div class="field"><label for="p-text">Treść${hasKf(c, 'text') ? ' <span class="anim-tag">animowana</span>' : ''}</label><textarea id="p-text" data-path="text" rows="3">${esc(hasKf(c, 'text') ? pv(c, 'text', localAt(c)) : P.text)}</textarea></div>
       <div class="row2">
         <div class="field"><span class="lbl">Krój</span><button type="button" class="font-btn" id="p-font" data-act="font" aria-haspopup="dialog" title="Wybierz spośród wszystkich czcionek Google" style="font-family:'${esc(P.font)}',sans-serif">${esc(P.font)}</button></div>
         ${ctlSelect(c, 'weight', 'Grubość', fontWeights(P.font).map(w => [w, `${WEIGHT_NAMES[w] || w} (${w})`]))}
       </div>
-      ${ctlRange(c, 'size', 'Rozmiar', 12, 500, 1, 'px')}
+      ${ctlRange(c, 'size', 'Rozmiar', 12, 500, 1, 'px', true)}
       <div class="row2">${ctlSelect(c, 'fillType', 'Wypełnienie', [['solid', 'Jeden kolor'], ['linear', 'Gradient liniowy'], ['radial', 'Gradient kołowy']])}${ctlSelect(c, 'align', 'Wyrównanie', [['left', 'Do lewej'], ['center', 'Do środka'], ['right', 'Do prawej']])}</div>
       ${P.fillType === 'linear' || P.fillType === 'radial' ? gradEditor(c) : ctlColor(c, 'color', 'Kolor')}
-      ${ctlRange(c, 'spacing', 'Odstęp liter', -10, 60, 1, 'px')}
+      ${ctlRange(c, 'spacing', 'Odstęp liter', -10, 60, 1, 'px', true)}
       ${ctlRange(c, 'lineHeight', 'Interlinia', 0.8, 2.5, 0.05, 'n')}
       <div class="row2">${ctlCheck(c, 'italic', 'Kursywa')}${ctlCheck(c, 'upper', 'WERSALIKI')}</div>
       ${ctlRange(c, 'stroke', 'Obrys', 0, 30, 0.5, 'px')}
@@ -682,7 +688,12 @@ function clipInspector(c) {
       <button class="btn small" data-act="resetefx">${bitmap ? 'Wyzeruj efekty' : 'Wyłącz drżenie'}</button>`);
   }
   if (c.kind === 'video' || c.kind === 'image') {
+    const brushing = keyBrush.on && keyBrush.clipId === c.id;
     h += sec('key', 'Kluczowanie koloru (green screen)', `
+      <button type="button" class="btn small key-brush-btn${brushing ? ' primary' : ''}" data-act="keybrush" aria-pressed="${brushing}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L12 14.6 9.4 12z"/><path d="M8.2 13.2a3.5 3.5 0 0 0-4.9 4.9c-.6 1-1.5 1.7-2.3 1.9 2.3 1.3 5.6 1.2 7.4-.6a3.5 3.5 0 0 0-.2-6.2z"/></svg>
+        ${brushing ? 'Zakończ malowanie' : 'Pędzel: pomaluj tło na podglądzie'}</button>
+      <p class="hint">${brushing ? 'Maluj po tle, które ma zniknąć — każde pociągnięcie poprawia kolor i tolerancję. Esc kończy.' : 'Pomaluj tło pędzlem, a program sam dobierze kolor i tolerancję — albo ustaw je ręcznie poniżej.'}</p>
       ${ctlCheck(c, 'key.on', 'Usuń tło w kolorze')}
       <div class="row2">${ctlColor(c, 'key.color', 'Kolor tła')}
         <div class="field"><span class="lbl">&nbsp;</span>${window.EyeDropper ? '<button class="btn small" data-act="eyedrop" title="Pobierz kolor z ekranu">Pipeta</button>' : ''}</div></div>
@@ -710,6 +721,9 @@ function clipInspector(c) {
         ${ctlCheck(c, 'afx.clean', 'Oczyść (usuń dudnienie i syk)')}
         ${ctlCheck(c, 'afx.hum', 'Usuń buczenie sieci 50 Hz')}
         ${ctlCheck(c, 'afx.comp', 'Kompresor (wyrównuje cichsze i głośniejsze)')}
+        ${ctlSelect(c, 'afx.voicefx', 'Efekt głosu', [['none', 'Brak'], ['phone', 'Telefon'], ['radio', 'Stare radio'], ['megaphone', 'Megafon'], ['underwater', 'Pod wodą'], ['robot', 'Robot']])}
+        ${ctlRange(c, 'afx.reverb', 'Pogłos (sala, kościół)', 0, 100, 1, 'pc')}
+        ${ctlRange(c, 'afx.echo', 'Echo', 0, 100, 1, 'pc')}
         <h4 class="sub-h">Korektor</h4>
         ${ctlRange(c, 'afx.bass', 'Basy', -12, 12, 0.5, 'n')}
         ${ctlRange(c, 'afx.mid', 'Środek', -12, 12, 0.5, 'n')}
@@ -756,6 +770,13 @@ function renderInspectorValues() {
     if (out) out.textContent = FMT[out.dataset.fmt](v);
   }
   for (const b of box.querySelectorAll('[data-kfbtn]')) b.setAttribute('aria-pressed', kfIndexAt(c, b.dataset.kfbtn, snapLocal(c)) >= 0);
+  // animowana treść i kolor napisu nadążają za głowicą
+  for (const n of KF_STR) {
+    const el = box.querySelector(`[data-path="${n}"]`);
+    if (el && el !== document.activeElement && hasKf(c, n)) el.value = pv(c, n, localAt(c));
+  }
+  const ab = $('#animBanner');
+  if (ab) ab.textContent = animBannerText();
 }
 
 const inspEl = $('#inspector');
@@ -783,7 +804,8 @@ inspEl.addEventListener('input', e => {
   }
   if (!c || !el.dataset.path) return;
   const v = readVal(el);
-  if (el.hasAttribute('data-kf')) setProp(c, el.dataset.path, v); else setPath(c.props, el.dataset.path, v);
+  if (el.hasAttribute('data-kf') || canAnimate(c, el.dataset.path)) setProp(c, el.dataset.path, v); else setPath(c.props, el.dataset.path, v);
+  if (animMode && hasKf(c, el.dataset.path)) renderLanes(); // romby klatek na klipie
   const out = $('#o-' + el.id);
   if (out) out.textContent = FMT[out.dataset.fmt](v);
   if (el.dataset.path === 'text') {
@@ -796,6 +818,15 @@ inspEl.addEventListener('input', e => {
 });
 inspEl.addEventListener('change', e => {
   const el = e.target;
+  if (el.id === 'rampLo' || el.id === 'rampHi') {
+    // zakres prędkości ramp — ustawienie tego komputera, nie klipu
+    const p = rampPrefs();
+    const v = parseFloat(String(el.value).replace(',', '.'));
+    if (el.id === 'rampLo') p.lo = clamp(v || 0.3, 0.1, 1); else p.hi = clamp(v || 3, 1.5, 20);
+    el.value = el.id === 'rampLo' ? p.lo : p.hi;
+    try { localStorage.setItem('cloudcut-ramp', JSON.stringify(p)); } catch { /* bez zapisu */ }
+    return;
+  }
   if (el.id === 'pr-res') {
     const [w, h] = el.value.split('x').map(Number);
     state.w = w; state.h = h;
@@ -949,6 +980,8 @@ inspEl.addEventListener('click', async e => {
     c.kf.x = [{ t: 0, v: c.props.x }, { t: c.dur, v: c.props.x - Math.round(state.w * 0.035) }];
     commit(); renderAll();
     toast('Dodano powolny najazd — zmień wartości ◆ na początku lub końcu klipu');
+  } else if (act === 'keybrush' && c) {
+    if (keyBrush.on && keyBrush.clipId === c.id) stopKeyBrush(); else { stopKeyBrush(); startKeyBrush(c); }
   } else if (act === 'eyedrop' && c && window.EyeDropper) {
     try {
       const r = await new EyeDropper().open();
@@ -1071,6 +1104,15 @@ async function snapshotPng() {
    Przyciski
    ========================================================= */
 function toggleLoop() { loopOn = !loopOn; $('#btnLoop').setAttribute('aria-pressed', loopOn); toast(loopOn ? 'Zapętlanie włączone' : 'Zapętlanie wyłączone', 1500); }
+/* Tryb animacji: przycisk nad podglądem (Alt+A) */
+const animBannerText = () => `● Tryb animacji — zmiany zapisują się jako klatki kluczowe w ${tc(playhead)}`;
+function toggleAnim(on = !animMode) {
+  animMode = on;
+  document.body.classList.toggle('anim-mode', on);
+  $('#btnAnim').setAttribute('aria-pressed', on);
+  renderInspector();
+  toast(on ? 'Tryb animacji włączony: ustaw głowicę, zmień położenie, rozmiar, kolor albo treść — powstanie animacja' : 'Tryb animacji wyłączony', on ? 5000 : 2000);
+}
 function toggleGuides() { guidesOn = !guidesOn; $('#btnGuides').setAttribute('aria-pressed', guidesOn); drawOverlay(); }
 function toggleSnap() { snapOn = !snapOn; $('#btnSnap').setAttribute('aria-pressed', snapOn); }
 
@@ -1091,6 +1133,7 @@ $('#toolSelect').addEventListener('click', () => setTool('select'));
 $('#toolBlade').addEventListener('click', () => setTool('blade'));
 $('#btnSplit').addEventListener('click', () => splitAt(playhead));
 $('#btnSplitAV').addEventListener('click', () => splitAV());
+$('#btnFreeze').addEventListener('click', e => freezeMenu(e.currentTarget));
 $('#btnDelete').addEventListener('click', () => deleteSelected(false));
 $('#btnRipple').addEventListener('click', () => deleteSelected(true));
 $('#btnLink').addEventListener('click', toggleLink);
@@ -1109,6 +1152,7 @@ $('#btnFit').addEventListener('click', zoomFit);
 $('#zoom').addEventListener('input', e => setZoom(sliderToPps(+e.target.value)));
 $('#btnGuides').addEventListener('click', toggleGuides);
 $('#btnScopes').addEventListener('click', () => toggleScopes());
+$('#btnAnim').addEventListener('click', () => toggleAnim());
 $('#btnSnapshot').addEventListener('click', snapshotPng);
 $('#btnFull').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
