@@ -268,6 +268,9 @@
     <button class="tool rec" id="btnRecord" title="Nagraj głos z mikrofonu (Shift+R)" aria-label="Nagraj głos z mikrofonu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
     </button>
+    <button class="tool keypick" id="btnKeyPick" aria-pressed="false" title="Chroma key: kliknij kolor tła na podglądzie albo pomaluj tło — zniknie" aria-label="Chroma key — pipeta koloru tła">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 4.5 5 5"/><path d="M17 2.8a2.1 2.1 0 0 1 3 3L18.2 7.6l-1.8-1.8z"/><path d="M15.6 6.4 5 17v2.5h2.5L18.1 9"/><circle cx="4.5" cy="20.5" r="1" fill="currentColor"/></svg>
+    </button>
     <button class="tool pro" id="btnPro" aria-haspopup="menu" title="Narzędzia Pro: napisy AI, usuwanie ciszy, wykrywanie scen i rytmu, ściszanie muzyki pod głosem">✦ Pro</button>
     <span class="tool-sep" aria-hidden="true"></span>
     <button class="tool" id="btnSnap" aria-pressed="true" title="Przyciąganie (N)">
@@ -646,6 +649,7 @@
         <p class="home-sub">Twoje rzeczy do wszystkich projektów: czcionki, zdjęcia, filmy, muzyka i LUT-y (.cube). W edytorze są w zakładce Assety → Moje, a czcionki w wyborze czcionek („Moje czcionki”).</p>
       </div>
       <div class="lib-head-btns">
+        <button type="button" class="btn small ls-btn" id="libSort" title="Posegreguj pliki do folderów według rodzaju i nazwy (da się cofnąć)">✨ Uporządkuj</button>
         <button type="button" class="btn small" id="libNewFolder">+ Nowy folder</button>
         <button type="button" class="btn small" id="libAddDir" title="Wybierz folder na dysku — trafi do Biblioteki razem z podfolderami">Dodaj folder z dysku</button>
         <button type="button" class="btn primary small" id="libAdd">+ Dodaj pliki</button>

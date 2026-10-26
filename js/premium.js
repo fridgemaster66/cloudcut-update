@@ -223,6 +223,7 @@ function startKeyBrush(c) {
   Object.assign(keyBrush, { on: true, clipId: c.id, samples: [], pts: [] });
   if (!c.props.key.on) { c.props.key.on = true; drawFrame(); } // od razu widać efekt kolejnych pociągnięć
   overlay.classList.add('key-brush');
+  $('#btnKeyPick')?.setAttribute('aria-pressed', 'true');
   renderInspector();
   toast('Pomaluj tło na podglądzie (przytrzymaj i przeciągnij). Kilka pociągnięć = dokładniej. Esc kończy.', 5000);
 }
@@ -230,8 +231,26 @@ function stopKeyBrush() {
   if (!keyBrush.on) return;
   Object.assign(keyBrush, { on: false, clipId: null, img: null, samples: [], pts: [] });
   overlay.classList.remove('key-brush');
+  $('#btnKeyPick')?.setAttribute('aria-pressed', 'false');
   drawOverlay();
   renderInspector();
+}
+/* Pipeta na pasku narzędzi: bierze zaznaczony film/zdjęcie albo najwyższy pod głowicą i od razu czeka na kliknięcie w tło */
+function keyPickFromToolbar() {
+  if (keyBrush.on) { stopKeyBrush(); return; }
+  if (playing) pause();
+  const t = playhead, at = c => !c.off && (c.kind === 'video' || c.kind === 'image') && t >= c.start && t < clipEnd(c) && !trackOf(c)?.hidden;
+  let c = selectedClips().find(at);
+  if (!c) for (const tr of state.tracks) { if (tr.kind !== 'video') continue; c = clipsOn(tr.id).find(at); if (c) break; } // ścieżki od góry
+  if (!c) { toast('Ustaw głowicę na filmie albo zdjęciu z tłem do usunięcia (np. zielonym)', 4500); return; }
+  sel = new Set([c.id]);
+  inspClosed.delete('key'); // sekcja kluczowania rozwinięta, żeby było widać kolor i tolerancję
+  renderLanes(); drawFrame();
+  startKeyBrush(c);
+  if (keyBrush.on) {
+    $('#inspector [data-sec="key"]')?.scrollIntoView({ block: 'nearest' });
+    toast('Kliknij kolor tła na podglądzie (albo przeciągnij po tle). Kolejne kliknięcia doprecyzują. Esc albo ponowne kliknięcie pipety kończy.', 6000);
+  }
 }
 function drawKeyBrush(g) {
   g.save();

@@ -1113,12 +1113,64 @@ function hitPreview(p) {
 }
 
 overlay.addEventListener('pointermove', e => {
-  if (playing || e.buttons) return;
+  if ((playing && !animMode) || e.buttons) return; // w trybie animacji obiekt da się złapać także w trakcie odtwarzania
   const h = hitPreview(toProject(e));
   overlay.className = h ? (h.mode === 'scale' ? 'can-scale' : 'can-move') : '';
 });
+/* Nagrywanie ruchu (jak Motion Sketch w After Effects): w trybie animacji, podczas odtwarzania, przeciągasz obiekt
+   na podglądzie, a jego położenie zapisuje się co 1/12 s jako klatki kluczowe — film powtórzy dokładnie ten ruch */
+function motionRecord(e) {
+  const p0 = toProject(e);
+  const h = hitPreview(p0);
+  if (!h) return;
+  const c = clipById(h.b.id);
+  if (!c || isLocked(c)) return;
+  if (!sel.has(c.id)) { sel = new Set([c.id]); renderLanes(); }
+  const local0 = localAt(c);
+  const ox = pv(c, 'x', local0), oy = pv(c, 'y', local0);
+  c.kf ??= {};
+  // bez wcześniejszego ruchu: obiekt stoi w swoim miejscu od początku klipu do chwili, gdy go złapiesz
+  for (const k of ['x', 'y']) if (!hasKf(c, k)) c.kf[k] = local0 > frame() / 2 ? [{ t: 0, v: c.props[k] }] : [];
+  if (c.props.kfEase === 'smooth') c.props.kfEase = 'linear'; // nagrany ruch bez zwalniania na każdym punkcie
+  let pos = { x: ox, y: oy }, last = null, n = 0;
+  const put = (k, t, v) => {
+    const a = c.kf[k];
+    for (let i = a.length - 1; i >= 0; i--) if (a[i].t > (last ?? local0 - 1e-6) && a[i].t <= t + 1e-6) a.splice(i, 1); // nagranie zastępuje stary ruch
+    a.push({ t, v });
+    a.sort((x, y) => x.t - y.t);
+  };
+  const sample = (force = false) => {
+    if (!playing || playhead >= clipEnd(c)) { stop(); return; }
+    const t = Math.round(localAt(c) * 1000) / 1000;
+    if (!force && last !== null && t - last < 1 / 12) return;
+    put('x', t, Math.round(pos.x)); put('y', t, Math.round(pos.y));
+    last = t; n++;
+  };
+  try { overlay.setPointerCapture(e.pointerId); } catch { /* bez przechwytywania też nagrywa */ }
+  overlay.classList.add('rec-motion');
+  const timer = setInterval(sample, 1000 / 24); // obiekt trzymany w miejscu też się nagrywa
+  const mv = ev => { const p = toProject(ev); pos = { x: ox + (p.x - p0.x), y: oy + (p.y - p0.y) }; sample(); };
+  let done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    clearInterval(timer);
+    overlay.classList.remove('rec-motion');
+    overlay.removeEventListener('pointermove', mv);
+    overlay.removeEventListener('pointerup', up);
+    overlay.removeEventListener('pointercancel', up);
+    commit(); renderLanes(); renderInspector();
+    if (n) toast(`Nagrano ruch: ${plural(n, 'punkt', 'punkty', 'punktów')} — odtwórz, żeby zobaczyć animację`, 4000);
+  };
+  const up = () => { if (playing && playhead < clipEnd(c)) sample(true); stop(); };
+  overlay.addEventListener('pointermove', mv);
+  overlay.addEventListener('pointerup', up);
+  overlay.addEventListener('pointercancel', up);
+  sample(true);
+}
 overlay.addEventListener('pointerdown', e => {
   if (typeof keyBrush !== 'undefined' && keyBrush.on && e.button === 0) { keyBrushStroke(e); return; } // pędzel kluczowania
+  if (playing && animMode && e.button === 0) { motionRecord(e); return; } // nagrywanie ruchu w trybie animacji
   if (playing || e.button !== 0) return;
   const p0 = toProject(e);
   const h = hitPreview(p0);

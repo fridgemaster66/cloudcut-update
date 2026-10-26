@@ -220,6 +220,7 @@ function renderLibrary() {
       </div></div>`).join('');
   $('#libList').innerHTML = folderCards || fileCards ? folderCards + fileCards
     : `<div class="home-empty">${flat ? 'Nic nie pasuje do wyszukiwania.' : libFolder ? '<strong>Folder jest pusty</strong>Przeciągnij tu pliki albo karty z Biblioteki.' : '<strong>Biblioteka jest pusta</strong>Dodaj czcionki, zdjęcia, filmy, muzykę albo LUT-y — także całe foldery. Będą w każdym projekcie.'}</div>`;
+  if (isHomeOpen() && homeView === 'library') setTimeout(maybeOfferLibSort, 400); // propozycja porządku przy dużym bałaganie (raz)
 }
 $('#libAdd').addEventListener('click', () => $('#libInput').click());
 $('#libAddDir').addEventListener('click', () => $('#libDirInput').click());
@@ -388,3 +389,183 @@ $('#elibList').addEventListener('dragstart', e => {
   e.dataTransfer.setData('text/x-kadr-asset', card.dataset.asset);
   e.dataTransfer.effectAllowed = 'copy';
 });
+
+/* ---------- Porządkowanie Biblioteki jednym kliknięciem ----------
+   Pliki z głównego folderu i ze znanych folderów (piosenki, loga, filmiki, obrazki…) trafiają do uporządkowanych
+   folderów z podfolderami. Foldery o innych nazwach (własne) zostają nietknięte. Nic nie jest kasowane, a „Cofnij” przywraca stan. */
+const lsNorm = s => String(s).toLowerCase().replace(/ł/g, 'l').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[_\-.…]+/g, ' ').replace(/\s+/g, ' ').trim();
+const LS_ALIAS = {
+  piosenki: ['Piosenki'], muzyka: ['Piosenki'], music: ['Piosenki'], songs: ['Piosenki'],
+  loga: ['Loga'], logo: ['Loga'], logos: ['Loga'],
+  filmiki: ['Filmiki'], filmy: ['Filmiki'], wideo: ['Filmiki'], video: ['Filmiki'], animacje: ['Filmiki'],
+  obrazki: ['Obrazki'], zdjecia: ['Obrazki'], grafiki: ['Obrazki'], images: ['Obrazki'],
+  'efekty dziwkowe': ['Efekty dźwiękowe'], 'efekty dzwiekowe': ['Efekty dźwiękowe'], 'efekty dzwiekowe i muzyka': ['Efekty dźwiękowe'], sfx: ['Efekty dźwiękowe'], dzwieki: ['Efekty dźwiękowe'],
+  czcionki: ['Czcionki'], fonty: ['Czcionki'], fonts: ['Czcionki'],
+  'swiataczne obrazki': ['Obrazki', 'Świąteczne'], 'swiateczne obrazki': ['Obrazki', 'Świąteczne'], swiateczne: ['Obrazki', 'Świąteczne'],
+  'rangi i tagi': ['Obrazki', 'Rangi i tagi'], rangi: ['Obrazki', 'Rangi i tagi'],
+};
+const LS_TOP = ['Czcionki', 'Loga', 'Piosenki', 'Efekty dźwiękowe', 'Filmiki', 'Obrazki', 'LUT-y', 'Style i looki'];
+const LS_MC = /minecraft|minecrafter|minercraft|steve|creeper|ender|nether|portal|cobbl|kowadl|skrzyn|skryzn|perla|flint|\bexp\b|level up|achiv|achiev|obrazenia|jedzenie|plywanie|drewno|kroki|\bgui\b|villager|wither|zombie|enderman|redstone|totem/;
+const LS_UNDERTALE = /undertale|deltarune|megalovania|\bsans\b|bonetrousle|fallen down|hopes and dreams|his theme|^home\b|spear of justice|spider dance|ghost fight|your best friend|can you really call this a hotel|death by glamour|heartache|battle against a true hero|snowdin|asgore/;
+const LS_XMAS = /christmas|xmas|jingle|santa|deck the halls|swiat[ae]czn|swieta|koled|mikolaj|choink|balwan|cukier|lizak|czekolad|renifer/;
+const LS_SFX = /whoosh|swoosh|\bpop\b|klik|click|ding|impact|alarm|pikan|przycisk|zegar|tykan|klaskan|efekt|sound|dzwiek|zdjeci|papier|stron|kamer|komputer|telefon|szkl|ogien|podwod|drzwi|wybuch|beep|powiadom/;
+const LS_MC_MUSIC = /c418|sweden|wet hands|aria math|haggstrom|subwoofer|lena raine|pigstep|otherside|minecraft (theme|music|song|soundtrack)/;
+const LS_EFFECTS = /\b(absorption|accelerate|bad luck|bad omen|beast surge|blindness|conduit|cool down|critical|darkness|dolphin|dynamo|final shout|fire aspect|fire resistance|food reserves|freezing|glowing|gravity|haste|health boost|hunger|instant damage|instant health|invisibility|jump boost|leeching|levitation|looting|luck|mining fatigue|multishot|nausea|night vision|pain cycle|poison|posion|potion|prospector|protection|regeneration|resistance|roll charge|shadow blast|sharpness|shockwave|slow falling|slowness|smiting|speed|strength|swiftfooted|swirling|unchanting|weakness|wither|efficiency|fortune|mending|unbreaking|knockback|thorns|silk touch|infinity|respiration|feather falling|depth strider|frost walker|soul speed|loyalty|riptide|channeling|impaling|piercing|quick charge|sweeping|water breathing|saturation|hero of the village|trial omen|raid omen|infested|oozing|weaving|wind charged)\b/;
+/* Ścieżka folderu dla pliku; top — kategoria wymuszona folderem, w którym użytkownik już go trzymał */
+function lsClassify(a, top) {
+  const n = lsNorm(a.name.replace(/\.[a-z0-9]{2,5}$/i, '')), k = libKind(a), d = a.data || {};
+  const dur = +d.duration || 0, w = +d.w || 0, h = +d.h || 1;
+  const gif = /\.gif$/i.test(a.name) || /gif/i.test(a.type || '');
+  if (k === 'font') return ['Czcionki', /minecraft|minecrafter|minercraft|craft|pixel|8 ?bit|press start|vt323|silkscreen/.test(n) ? 'Minecraft i pikselowe' : 'Ogólne'];
+  if (k === 'lut') return ['LUT-y'];
+  if (k === 'style') return ['Style i looki'];
+  if (k === 'audio') {
+    const und = LS_UNDERTALE.test(n), xmas = LS_XMAS.test(n);
+    const sfx = top === 'Efekty dźwiękowe' || (top !== 'Piosenki' && !und && !xmas && (dur < 30 || LS_SFX.test(n) || (LS_MC.test(n) && dur < 90)));
+    if (sfx) return ['Efekty dźwiękowe', LS_MC.test(n) ? 'Minecraft' : 'Ogólne'];
+    return ['Piosenki', und ? 'Undertale' : xmas ? 'Świąteczne' : LS_MC_MUSIC.test(n) ? 'Minecraft' : 'Ogólne'];
+  }
+  if (k === 'video') {
+    if (/planks|stone|cobble|brick|bambus|bamboo|spruce|\boak\b|birch|dirt|grass block|deepslate|terracotta|concrete|netherrack|obsidian/.test(n) && dur >= 8) return ['Filmiki', 'Tła z bloków Minecraft'];
+    if (/\blike\b|\bsub\b|subskryb|komentarz|dolacz|follow|lapka|subscribe/.test(n)) return ['Filmiki', 'YouTube (like, sub, komentarz)'];
+    if (/przejsci|transition|przesuwan/.test(n)) return ['Filmiki', 'Przejścia'];
+    if (LS_MC.test(n) || /border|zrzut|anarchi|you died|stworz nowy swiat|korona|green screen|zbuduj|\bend\b|\bkrat|^\d{3}$/.test(n)) return ['Filmiki', 'Animacje Minecraft'];
+    return ['Filmiki', 'Ogólne'];
+  }
+  // obrazki: najpierw loga (z folderu „loga” albo po nazwie), potem rodzaje grafik
+  const logo = top === 'Loga' || (!gif && (/\blogo\b/.test(n) || /^minecraft/.test(n) || (/anarchia|igrzyska/.test(n) && w / h > 1.8)));
+  if (logo) return ['Loga', /minecraft|anarchia|igrzyska|serwer|server|survival|hardcore/.test(n) ? 'Minecraft i serwer' : /premiere|capcut|davinci|resolve|photoshop|after effects|\bobs\b|vegas|filmora|discord|youtube|tiktok|twitch|instagram/.test(n) ? 'Programy i aplikacje' : 'Gry'];
+  if (gif) return ['Obrazki', 'GIF-y'];
+  if (LS_XMAS.test(n)) return ['Obrazki', 'Świąteczne'];
+  if (/admin|helper|moderator|wlasciciel|owner|\bvip\b|ranga|legendarn|niesamowit|radioaktywn|rzadki|pospolit|zabytek|znaki zapytania|epick|mityczn/.test(n)) return ['Obrazki', 'Rangi i tagi'];
+  if (/flag/.test(n)) return ['Obrazki', 'Flagi'];
+  if (/dystrykt/.test(n)) return ['Obrazki', 'Dystrykty'];
+  if (LS_EFFECTS.test(n)) return ['Obrazki', 'Ikony efektów i zaklęć'];
+  if (/\bbow\d?\b|sword|miecz|pickaxe|kilof|ingot|diamond|diament|emerald|szmaragd|\bcoal\b|wegiel|netherite|elytra|trident|shield|tarcza|\bfire\b/.test(n)) return ['Obrazki', 'Przedmioty Minecraft'];
+  if (/^#\s?\d|zostal otwarty|zmniejsza|napis|kalendarz|skomentuj|subskryb|pink screen|aternos|tablica|\bcps\b|\bfps\b/.test(n)) return ['Obrazki', 'Napisy i plansze'];
+  if (/nakladk|\btlo\b|tlem|green screen|particles|ogien|bable\d|slonce|swiecac|\bcien\b|trawa|serca|rzeczy|\bswiat\b|biala mapa|czarne tlo/.test(n)) return ['Obrazki', 'Nakładki i tła'];
+  return ['Obrazki', 'Ikony i elementy'];
+}
+/* Plan porządku: dokąd trafi każdy plik + które istniejące foldery dostaną nowe nazwy */
+function libSortPlan() {
+  const aliasOf = f => LS_ALIAS[lsNorm(f.name)] || null;
+  const folderPathNames = id => libFolderPath(id).map(f => f.name);
+  const moves = [], renames = [];
+  for (const f of libFolders) {
+    const al = libParentOf(f) ? null : aliasOf(f); // przemianowujemy tylko znane foldery główne
+    if (al && (al.length > 1 || al[0] !== f.name)) renames.push({ f, path: al });
+  }
+  for (const a of userAssets) {
+    const fid = libFolderOf(a);
+    let top = null;
+    if (fid) {
+      const path = libFolderPath(fid), al = aliasOf(path[0]);
+      if (!al) continue; // własny folder użytkownika — nie ruszamy
+      if (path.length > 1) continue; // już w podfolderze (posegregowane albo ułożone ręcznie)
+      if (al.length > 1) continue; // np. „rangi i tagi” — przenosi się cały folder (zmiana nazwy niżej)
+      top = al[0];
+    }
+    const target = lsClassify(a, top);
+    const now = fid ? folderPathNames(fid) : [];
+    if (now.join('/') !== target.join('/')) moves.push({ a, from: now, path: target });
+  }
+  return { moves, renames };
+}
+function libSortTree(plan) {
+  const tree = new Map();
+  for (const m of plan.moves) {
+    const [top, sub = ''] = m.path;
+    if (!tree.has(top)) tree.set(top, new Map());
+    const t = tree.get(top);
+    if (!t.has(sub)) t.set(sub, []);
+    t.get(sub).push(m.a.name);
+  }
+  return [...tree.entries()].sort((a, b) => LS_TOP.indexOf(a[0]) - LS_TOP.indexOf(b[0]));
+}
+let libSortDlg = null;
+function openLibSort(auto = false) {
+  const plan = libSortPlan();
+  if (!plan.moves.length) { if (!auto) toast('Biblioteka jest już uporządkowana'); return; }
+  if (!libSortDlg) {
+    libSortDlg = document.createElement('dialog');
+    libSortDlg.className = 'dlg wide';
+    libSortDlg.setAttribute('aria-labelledby', 'lsTitle');
+    document.body.appendChild(libSortDlg);
+  }
+  const tree = libSortTree(plan);
+  libSortDlg.innerHTML = `<h2 id="lsTitle">✨ Uporządkuj Bibliotekę</h2>
+    <p class="hint">Program posegreguje ${plural(plan.moves.length, 'plik', 'pliki', 'plików')} do folderów według rodzaju i nazwy. Nic nie zostanie usunięte, a foldery o własnych nazwach zostaną nietknięte. Potem możesz wszystko cofnąć jednym kliknięciem.</p>
+    <div class="ls-tree">${tree.map(([top, subs]) => `<div class="ls-top"><strong>${esc(top)}</strong>
+      ${[...subs.entries()].map(([sub, names]) => `<details><summary>${sub ? esc(sub) : '(bez podfolderu)'} <span class="lib-n">${names.length}</span></summary><p class="ls-names">${names.map(esc).join(' · ')}</p></details>`).join('')}</div>`).join('')}</div>
+    ${plan.renames.length ? `<p class="hint">Nowe nazwy folderów: ${plan.renames.map(r => `„${esc(r.f.name)}” → „${esc(r.path.join(' › '))}”`).join(', ')}.</p>` : ''}
+    <div class="dlg-actions"><button type="button" class="btn" id="lsCancel">${auto ? 'Nie teraz' : 'Anuluj'}</button><button type="button" class="btn primary" id="lsGo">Posegreguj (${plan.moves.length})</button></div>`;
+  $('#lsCancel').onclick = () => libSortDlg.close();
+  $('#lsGo').onclick = async () => { libSortDlg.close(); await applyLibSort(); };
+  libSortDlg.showModal();
+  $('#lsGo').focus();
+}
+const LS_UNDO = 'cloudcut-libsort-undo';
+async function applyLibSort() {
+  const plan = libSortPlan();
+  if (!plan.moves.length) return;
+  const undo = { assets: {}, folders: {}, created: [] };
+  const line = $('#libLine');
+  line.hidden = false; line.className = 'gh-line';
+  const before = new Set(libFolders.map(f => f.id));
+  // 1) znane foldery dostają porządne nazwy i miejsce (np. „swiataczne obrazki” → Obrazki › Świąteczne)
+  const ensurePath = async path => { let parent = null; for (const p of path) parent = await libEnsureFolder(p, parent); return parent; };
+  for (const r of plan.renames) {
+    const parent = r.path.length > 1 ? await ensurePath(r.path.slice(0, -1)) : null;
+    const f = libFolderById(r.f.id);
+    undo.folders[f.id] = { name: f.name, parent: libParentOf(f) };
+    const nf = { ...f, name: r.path.at(-1), data: { ...(f.data || {}), parent } };
+    await Store.putAsset(nf);
+    Object.assign(f, nf);
+  }
+  // 2) pliki do swoich folderów
+  let i = 0;
+  for (const m of plan.moves) {
+    if (++i % 10 === 1) line.textContent = `Porządkowanie Biblioteki… ${i}/${plan.moves.length}`;
+    const fid = await ensurePath(m.path);
+    undo.assets[m.a.id] = libFolderOf(m.a);
+    await Store.putAsset({ ...m.a, data: { ...(m.a.data || {}), folder: fid } });
+  }
+  undo.created = libFolders.filter(f => !before.has(f.id)).map(f => f.id);
+  try { localStorage.setItem(LS_UNDO, JSON.stringify(undo)); } catch { /* bez cofania */ }
+  libFolder = null;
+  await loadUserAssets();
+  line.innerHTML = `✓ Posegregowano ${plural(plan.moves.length, 'plik', 'pliki', 'plików')} do folderów. <button type="button" class="linkbtn" id="lsUndo">Cofnij porządkowanie</button>`;
+  $('#lsUndo').onclick = () => undoLibSort();
+  toast('Biblioteka uporządkowana');
+}
+async function undoLibSort() {
+  let u = null;
+  try { u = JSON.parse(localStorage.getItem(LS_UNDO) || 'null'); } catch { /* brak */ }
+  if (!u) { toast('Nie ma czego cofnąć'); return; }
+  const line = $('#libLine');
+  line.textContent = 'Cofanie porządkowania…';
+  for (const [id, folder] of Object.entries(u.assets)) {
+    const a = userAssets.find(x => x.id === id);
+    if (a) await Store.putAsset({ ...a, data: { ...(a.data || {}), folder } });
+  }
+  for (const [id, f0] of Object.entries(u.folders)) {
+    const f = libFolderById(id);
+    if (f) await Store.putAsset({ ...f, name: f0.name, data: { ...(f.data || {}), parent: f0.parent } });
+  }
+  await loadUserAssets();
+  // foldery założone przy porządkowaniu znikają, jeśli zostały puste
+  for (const id of [...u.created].reverse()) if (!libFolderFiles(id).length && !libChildFolders(id).length) await Store.deleteAsset(id).then(loadUserAssets);
+  try { localStorage.removeItem(LS_UNDO); } catch { /* bez zapisu */ }
+  await loadUserAssets();
+  line.textContent = 'Przywrócono Bibliotekę sprzed porządkowania.';
+}
+$('#libSort').addEventListener('click', () => openLibSort());
+/* Raz, przy pierwszym wejściu do Biblioteki z dużym bałaganem, program sam proponuje porządek */
+function maybeOfferLibSort() {
+  if (Store.mode !== 'cloud' || libSortDlg?.open) return;
+  try { if (localStorage.getItem('cloudcut-libsort-offered')) return; } catch { return; }
+  const loose = userAssets.filter(a => !libFolderOf(a)).length;
+  if (loose < 30) return;
+  try { localStorage.setItem('cloudcut-libsort-offered', '1'); } catch { /* bez zapisu */ }
+  openLibSort(true);
+}

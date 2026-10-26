@@ -1224,3 +1224,14 @@ body.anim-mode #screenBox { box-shadow: 0 0 0 2px #ff5a5a, 0 0 22px rgba(255,90,
 #ytdWhen { margin: 4px 0 0 23px; width: calc(100% - 23px); }
 .yt-note { margin-top: 2px; }
 #expStatus a { color: var(--accent); }
+.tool.keypick svg { color: #2fbf71; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool.keypick[aria-pressed="true"] { background: rgba(47,191,113,.2); border-color: rgba(47,191,113,.6); }
+#overlay.rec-motion { cursor: grabbing; }
+body.anim-mode.is-playing #screenBox { box-shadow: 0 0 0 3px #ff5a5a, 0 0 28px rgba(255,90,90,.5); }
+.ls-btn { border-color: rgba(176,107,255,.5); color: #e2d2ff; }
+.ls-tree { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; max-height: 52vh; overflow: auto; margin: 6px 0 10px; }
+.ls-top { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: var(--panel-2); }
+.ls-top > strong { display: block; margin-bottom: 4px; }
+.ls-top details { font-size: 12.5px; margin: 2px 0; }
+.ls-top summary { cursor: pointer; }
+.ls-names { margin: 4px 0 6px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }

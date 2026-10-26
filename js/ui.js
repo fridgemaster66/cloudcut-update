@@ -1105,13 +1105,13 @@ async function snapshotPng() {
    ========================================================= */
 function toggleLoop() { loopOn = !loopOn; $('#btnLoop').setAttribute('aria-pressed', loopOn); toast(loopOn ? 'Zapętlanie włączone' : 'Zapętlanie wyłączone', 1500); }
 /* Tryb animacji: przycisk nad podglądem (Alt+A) */
-const animBannerText = () => `● Tryb animacji — zmiany zapisują się jako klatki kluczowe w ${tc(playhead)}`;
+const animBannerText = () => `● Tryb animacji (${tc(playhead)}): zmień położenie, rozmiar, kolor albo treść — zapisze się w tym miejscu. Albo włącz odtwarzanie i przeciągnij obiekt na podglądzie — nagra się cały ruch.`;
 function toggleAnim(on = !animMode) {
   animMode = on;
   document.body.classList.toggle('anim-mode', on);
   $('#btnAnim').setAttribute('aria-pressed', on);
   renderInspector();
-  toast(on ? 'Tryb animacji włączony: ustaw głowicę, zmień położenie, rozmiar, kolor albo treść — powstanie animacja' : 'Tryb animacji wyłączony', on ? 5000 : 2000);
+  toast(on ? 'Tryb animacji: włącz odtwarzanie (spacja) i przeciągnij napis na podglądzie — ruch się nagra. Albo ustawiaj głowicę i zmieniaj położenie, kolor, treść.' : 'Tryb animacji wyłączony', on ? 6000 : 2000);
 }
 function toggleGuides() { guidesOn = !guidesOn; $('#btnGuides').setAttribute('aria-pressed', guidesOn); drawOverlay(); }
 function toggleSnap() { snapOn = !snapOn; $('#btnSnap').setAttribute('aria-pressed', snapOn); }
@@ -1175,6 +1175,7 @@ window.addEventListener('beforeunload', e => {
 for (const b of $$('[data-tool]')) b.addEventListener('click', () => setTool(b.dataset.tool));
 $('#btnPro').addEventListener('click', e => openProMenu(e.currentTarget));
 $('#btnMixer').addEventListener('click', () => openMixer());
+$('#btnKeyPick').addEventListener('click', () => keyPickFromToolbar());
 $('#btnRecord').addEventListener('click', () => (rec.dlg?.open ? closeRecorder() : openRecorder()));
 
 /* =========================================================
