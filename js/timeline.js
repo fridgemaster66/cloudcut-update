@@ -31,6 +31,11 @@ function splitClip(c, t) {
   if (r.props.inType === 'cross') r.props.inType = 'fade';
   const [lk, rk] = splitKf(c.kf, cut);
   c.kf = lk; r.kf = rk;
+  const pu = c.props.punch;
+  if (pu?.amt > 0) {
+    r.props.punch = pu.at + pu.dur > cut ? { ...pu, at: pu.at - cut } : { ...PUNCH0 };
+    if (pu.at >= cut) c.props.punch = { ...PUNCH0 };
+  }
   c.dur = cut;
   c.props.fadeOut = 0;
   state.clips.push(r);
@@ -123,6 +128,20 @@ function addTextClip(presetKey = null, t = playhead, trackId = null) {
   commit(); renderAll();
   return c;
 }
+/* Komentarz: notatka dla siebie na ścieżce komentarzy — nie pojawia się w filmie */
+function addComment(t = playhead, trackId = null) {
+  const dur = 3;
+  t = Math.max(0, t);
+  let tr = trackId ? state.tracks.find(x => x.id === trackId && x.kind === 'note' && !x.locked) : null;
+  tr ||= state.tracks.find(x => x.kind === 'note' && !x.locked && !overlaps(x.id, t, t + dur)) || addTrack('note', false);
+  const c = newClip('note', tr.id, freeSlot(tr.id, t, dur), dur, { name: '' });
+  state.clips.push(c);
+  sel = new Set([c.id]);
+  commit(); renderAll();
+  inspClosed.delete('note');
+  $('#n-text')?.focus();
+  return c;
+}
 function addColorClip(presetKey, t = playhead, trackId = null) {
   let tr = trackId ? state.tracks.find(x => x.id === trackId && x.kind === 'video' && !x.locked) : null;
   tr ||= defaultTrack('video');
@@ -200,18 +219,84 @@ function paste(t = playhead) {
   commit(); renderAll();
 }
 
-function toggleLink() {
-  const s = selectedClips();
-  if (!s.length) return;
-  if (s.some(c => c.group)) {
-    for (const c of s) c.group = null;
-    toast('Rozłączono — klipy można teraz edytować osobno');
-  } else if (s.length > 1) {
+function unlinkSelected() {
+  const s = selectedClips().filter(c => c.group);
+  if (!s.length) { toast('Zaznaczone klipy nie są połączone'); return; }
+  for (const c of s) c.group = null;
+  toast('Rozłączono — klipy można teraz edytować osobno');
+  commit(); renderLanes(); renderInspector();
+}
+
+/* „Połącz”: z dwóch elementów robi jeden.
+   1) kawałki tego samego pliku, które stykają się na jednej ścieżce (np. po przecięciu) → jeden klip,
+   2) film z odłączonym dźwiękiem leżącym dokładnie pod nim → znowu jeden klip z dźwiękiem,
+   3) różne pliki nie zmieszczą się w jednym klipie — łączą się w grupę, która przesuwa się i tnie razem. */
+const JOIN_SKIP = new Set(['fadeIn', 'fadeOut', 'inType', 'outType']);
+const joinProps = c => JSON.stringify(Object.entries(c.props).filter(([k]) => !JOIN_SKIP.has(k)));
+function canHeal(a, b) {
+  if (a.kind !== b.kind || a.trackId !== b.trackId || !!a.off !== !!b.off || Math.abs(clipEnd(a) - b.start) > 0.002) return false;
+  if (a.mediaId !== b.mediaId || joinProps(a) !== joinProps(b)) return false;
+  if (!isAV(a)) return true; // obraz, napis, plansza, kształt: te same ustawienia
+  return Math.abs(a.speed - b.speed) < 1e-6 && Math.abs(a.in + a.dur * a.speed - b.in) < 0.01; // materiał leci dalej bez skoku
+}
+function healInto(a, b) {
+  const off = a.dur;
+  a.kf ??= {};
+  for (const [n, k] of Object.entries(b.kf || {})) {
+    const all = [...(a.kf[n] || []), ...k.map(f => ({ t: f.t + off, v: f.v }))].sort((x, y) => x.t - y.t);
+    a.kf[n] = all.filter((f, i) => !i || Math.abs(f.t - all[i - 1].t) > 1e-4 || f.v !== all[i - 1].v); // klatka w miejscu cięcia była po obu stronach
+  }
+  a.dur = clipEnd(b) - a.start;
+  a.props.fadeOut = b.props.fadeOut;
+  if (b.props.outType !== undefined) a.props.outType = b.props.outType;
+}
+const isOwnAudio = (v, a) => v.kind === 'video' && a.kind === 'audio' && v.props.detached && v.mediaId === a.mediaId &&
+  Math.abs(v.start - a.start) < 0.002 && Math.abs(v.dur - a.dur) < 0.002 && Math.abs(v.in - a.in) < 0.01 && Math.abs(v.speed - a.speed) < 1e-6;
+function reattachAudio(v, a) {
+  v.props.detached = false;
+  v.props.volume = a.props.volume ?? 1;
+  if (a.props.afx) v.props.afx = structuredClone(a.props.afx);
+  v.kf ??= {};
+  if (a.kf?.volume?.length) v.kf.volume = structuredClone(a.kf.volume); else delete v.kf.volume;
+}
+function joinSelected() {
+  const s = selectedClips().filter(c => !isLocked(c));
+  if (s.length < 2) { toast('Zaznacz dwa klipy (Shift+klik), które mają stać się jednym'); return; }
+  const removed = new Set();
+  let healed = 0, reattached = 0;
+  const byTrack = new Map();
+  for (const c of s) { if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []); byTrack.get(c.trackId).push(c); }
+  for (const list of byTrack.values()) {
+    list.sort((a, b) => a.start - b.start);
+    let cur = list[0];
+    for (const nx of list.slice(1)) {
+      if (canHeal(cur, nx)) { healInto(cur, nx); removed.add(nx.id); healed++; } else cur = nx;
+    }
+  }
+  if (!healed) {
+    for (const v of s.filter(c => c.kind === 'video' && c.props.detached)) {
+      const a = s.find(x => !removed.has(x.id) && isOwnAudio(v, x));
+      if (a) { reattachAudio(v, a); removed.add(a.id); reattached++; }
+    }
+  }
+  if (!healed && !reattached) {
+    // różne pliki — jedna grupa (albo, gdy już są razem, rozłączenie)
+    if (s.every(c => c.group && c.group === s[0].group)) { unlinkSelected(); return; }
     const g = uid('g');
     for (const c of s) c.group = g;
-    toast('Połączono — klipy przesuwają się i tną razem');
-  } else { toast('Zaznacz co najmniej dwa klipy, żeby je połączyć'); return; }
-  commit(); renderLanes();
+    toast('To różne pliki, więc nie da się ich scalić w jeden klip — połączyłem je w grupę: przesuwają się i tną razem', 5000);
+    commit(); renderLanes(); renderInspector();
+    return;
+  }
+  state.clips = state.clips.filter(c => !removed.has(c.id));
+  for (const id of removed) sel.delete(id);
+  // grupy, z których został jeden klip, przestają być grupami
+  const count = new Map();
+  for (const c of state.clips) if (c.group) count.set(c.group, (count.get(c.group) || 0) + 1);
+  for (const c of state.clips) if (c.group && count.get(c.group) < 2) c.group = null;
+  gcPlayers();
+  commit(); renderAll();
+  toast(healed ? `Połączono w jeden klip (${plural(healed + 1, 'kawałek', 'kawałki', 'kawałków')} → 1)` : 'Połączono obraz z dźwiękiem w jeden klip');
 }
 
 /* Wydzielenie dźwięku filmu na osobny klip; linked = para dalej przesuwa się i tnie razem */
@@ -377,7 +462,8 @@ function videoClipAt(t) {
   const c = selectedClips().find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x));
   return c || state.tracks.filter(tr => tr.kind === 'video' && !tr.hidden).map(tr => clipsOn(tr.id).find(x => x.kind === 'video' && t >= x.start && t < clipEnd(x))).find(Boolean);
 }
-async function frameAsMedia(c, t) {
+/* Klatka filmu w chwili t jako obraz */
+async function frameCanvas(c, t) {
   const src = srcTimeOf(c, t), m = media.get(c.mediaId);
   // dokładna klatka prosto z dekodera (odtwarzacz tuż po przewinięciu potrafi oddać jeszcze poprzednią)
   let frame = null;
@@ -390,6 +476,10 @@ async function frameAsMedia(c, t) {
   const cv = document.createElement('canvas');
   cv.width = frame.videoWidth || frame.width; cv.height = frame.videoHeight || frame.height;
   cv.getContext('2d').drawImage(frame, 0, 0);
+  return cv;
+}
+async function frameAsMedia(c, t) {
+  const cv = await frameCanvas(c, t);
   const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
   return importBlob(blob, `${clipLabel(c)} — stopklatka ${tc(t)}.png`);
 }
@@ -475,9 +565,10 @@ function closeGapAt(trackId, t) {
 
 function addTrack(kind, doCommit = true) {
   const n = state.tracks.filter(t => t.kind === kind).length + 1;
-  const tr = mkTrack(uid('t'), kind, (kind === 'video' ? 'V' : kind === 'audio' ? 'A' : 'T') + n);
+  const tr = mkTrack(uid('t'), kind, ({ video: 'V', audio: 'A', text: 'T', note: 'K' }[kind]) + n);
   if (kind === 'audio') state.tracks.push(tr);
-  else if (kind === 'text') state.tracks.unshift(tr);
+  else if (kind === 'note') state.tracks.unshift(tr); // komentarze na samej górze
+  else if (kind === 'text') state.tracks.splice(state.tracks.filter(t => t.kind === 'note').length, 0, tr);
   else {
     const i = state.tracks.findIndex(t => t.kind === 'video');
     state.tracks.splice(i < 0 ? state.tracks.length : i, 0, tr); // nowe wideo ląduje na wierzchu
@@ -559,22 +650,23 @@ function jumpEdit(dir) {
 /* =========================================================
    Rysowanie osi czasu
    ========================================================= */
-function laneHeight(tr) { return tr.kind === 'text' ? TEXT_H : 58; }
+function laneHeight(tr) { return tr.kind === 'text' || tr.kind === 'note' ? TEXT_H : 58; }
 
 function renderHeads() {
   headsEl.innerHTML = `<div class="tl-head-spacer">${state.range ? `I–O ${shortDur(state.range.out - state.range.in)}` : ''}</div>` + state.tracks.map(tr => {
-    const color = { video: 'var(--c-video)', audio: 'var(--c-audio)', text: 'var(--c-text)' }[tr.kind];
+    const color = { video: 'var(--c-video)', audio: 'var(--c-audio)', text: 'var(--c-text)', note: 'var(--c-note)' }[tr.kind];
     const b = [];
-    if (tr.kind !== 'audio') b.push(`<button class="icon-btn" data-act="hidden" aria-pressed="${tr.hidden}" aria-label="Ukryj ścieżkę ${esc(tr.name)}" title="Ukryj ścieżkę">${ICON.eye}</button>`);
-    if (tr.kind !== 'text') b.push(`<button class="icon-btn" data-act="muted" aria-pressed="${tr.muted}" aria-label="Wycisz ścieżkę ${esc(tr.name)}" title="Wycisz ścieżkę">${ICON.speaker}</button>`);
+    if (tr.kind === 'video' || tr.kind === 'text') b.push(`<button class="icon-btn" data-act="hidden" aria-pressed="${tr.hidden}" aria-label="Ukryj ścieżkę ${esc(tr.name)}" title="Ukryj ścieżkę">${ICON.eye}</button>`);
+    if (isAudible(tr)) b.push(`<button class="icon-btn" data-act="muted" aria-pressed="${tr.muted}" aria-label="Wycisz ścieżkę ${esc(tr.name)}" title="Wycisz ścieżkę">${ICON.speaker}</button>`);
     if (tr.kind === 'audio') b.push(`<button class="icon-btn solo" data-act="solo" aria-pressed="${tr.solo}" aria-label="Solo ścieżki ${esc(tr.name)}" title="Solo — słychać tylko tę ścieżkę">S</button>`);
     b.push(`<button class="icon-btn" data-act="locked" aria-pressed="${tr.locked}" aria-label="Zablokuj ścieżkę ${esc(tr.name)}" title="Zablokuj ścieżkę">${ICON.lock}</button>`);
-    const vol = tr.kind !== 'text' && ((tr.vol ?? 1) !== 1 || (tr.pan ?? 0) !== 0) ? `<span class="tvol" title="Głośność ścieżki ${Math.round((tr.vol ?? 1) * 100)}%, panorama ${Math.round((tr.pan ?? 0) * 100)}">${Math.round((tr.vol ?? 1) * 100)}%</span>` : '';
+    const vol = isAudible(tr) && ((tr.vol ?? 1) !== 1 || (tr.pan ?? 0) !== 0) ? `<span class="tvol" title="Głośność ścieżki ${Math.round((tr.vol ?? 1) * 100)}%, panorama ${Math.round((tr.pan ?? 0) * 100)}">${Math.round((tr.vol ?? 1) * 100)}%</span>` : '';
     return `<div class="tl-head k-${tr.kind}" data-track="${tr.id}"><span class="tname" title="${esc(tr.name)} — prawy przycisk: opcje"><span class="dot" style="background:${color}"></span>${esc(tr.name)}${vol}</span>${b.join('')}</div>`;
   }).join('') + `<div class="tl-head tl-head-add" aria-label="Dodaj ścieżkę">
       <button class="add-tr" data-addtrack="video" title="Dodaj ścieżkę wideo (na wierzch)">+ Wideo</button>
       <button class="add-tr" data-addtrack="audio" title="Dodaj ścieżkę audio">+ Audio</button>
-      <button class="add-tr" data-addtrack="text" title="Dodaj ścieżkę napisów">+ Napisy</button></div>`;
+      <button class="add-tr" data-addtrack="text" title="Dodaj ścieżkę napisów">+ Napisy</button>
+      <button class="add-tr" data-addtrack="note" title="Dodaj ścieżkę komentarzy — notatki, których nie ma w filmie">+ Komentarze</button></div>`;
 }
 
 function clipStyle(c) {
@@ -602,16 +694,16 @@ function clipHtml(c) {
   const fo = P.fadeOut > 0 ? `<span class="fade fade-out" style="width:${Math.min(P.fadeOut, c.dur) * pps}px"></span>` : '';
   const kfs = kfTimes(c).map(t => `<span class="kfd" style="left:${t * pps}px"></span>`).join('');
   const label = clipLabel(c);
-  const icon = c.kind === 'text' ? ICON.text : c.group ? ICON.link : '';
+  const icon = c.kind === 'text' ? ICON.text : c.kind === 'note' ? ICON.note : c.group ? ICON.link : '';
   const spd = c.speed !== 1 ? `<span class="spd" title="${c.speed < 0 ? 'Odtwarzanie wstecz' : 'Prędkość'}">${c.speed < 0 ? '◀ ' : ''}${fmtSpeed(Math.abs(c.speed))}×</span>` : '';
-  const tags = [P.key?.on && 'klucz', P.lut?.id && 'LUT', P.mask?.type && P.mask.type !== 'none' && 'maska', P.afx && Object.entries(P.afx).some(([k, v]) => v && v !== AFX0[k]) && 'efekty audio'].filter(Boolean);
+  const tags = [P.filter && filterName(P.filter), P.key?.on && 'klucz', P.lut?.id && 'LUT', P.mask?.type && P.mask.type !== 'none' && 'maska', P.afx && Object.entries(P.afx).some(([k, v]) => v && v !== AFX0[k]) && 'efekty audio'].filter(Boolean);
   const fx = tags.length ? ' · ' + tags.join(' · ') : '';
   return `<div class="clip k-${c.kind}${sel.has(c.id) ? ' sel' : ''}${c.off ? ' off' : ''}" data-clip="${c.id}" style="${clipStyle(c)}" title="${esc(label)} — ${shortDur(c.dur)}">
     ${waveHtml(c)}${tb}${fi}${fo}${kfs}<div class="h h-l" data-h="l"></div><span class="clip-name">${icon}${spd}${esc(label)}${fx}</span><div class="h h-r" data-h="r"></div></div>`;
 }
 
 function renderLanes() {
-  const width = Math.max(scrollEl.clientWidth, (projectEnd() + 30) * pps);
+  const width = Math.max(scrollEl.clientWidth, (timelineEnd() + 30) * pps);
   inner.style.width = width + 'px';
   rulerEl.style.width = width + 'px';
   lanesEl.innerHTML = state.tracks.map(tr =>
@@ -1128,13 +1220,14 @@ headsEl.addEventListener('contextmenu', e => {
     items.push({ label: 'Przesuń niżej', disabled: same.indexOf(tr) === same.length - 1, act: () => moveTrack(tr, 1) });
     items.push({ label: 'Duplikuj ścieżkę z klipami', act: () => duplicateTrack(tr) });
     items.push({ label: 'Zaznacz wszystkie klipy na ścieżce', act: () => { sel = new Set(state.clips.filter(c => c.trackId === tr.id).map(c => c.id)); renderLanes(); renderInspector(); } });
-    if (tr.kind !== 'text') items.push({ label: 'Głośność i panorama (mikser)…', act: () => openMixer() });
-    items.push({ label: 'Usuń ścieżkę', disabled: same.length < 2, act: () => removeTrack(tr.id) });
+    if (isAudible(tr)) items.push({ label: 'Głośność i panorama (mikser)…', act: () => openMixer() });
+    items.push({ label: 'Usuń ścieżkę', disabled: same.length < 2 && tr.kind !== 'note', act: () => removeTrack(tr.id) });
     items.push('-');
   }
   items.push({ label: 'Dodaj ścieżkę wideo', act: () => addTrack('video') });
   items.push({ label: 'Dodaj ścieżkę audio', act: () => addTrack('audio') });
   items.push({ label: 'Dodaj ścieżkę napisów', act: () => addTrack('text') });
+  items.push({ label: 'Dodaj ścieżkę komentarzy', act: () => addTrack('note') });
   items.push({ label: 'Mikser audio…', act: () => openMixer() });
   openMenu(e.clientX, e.clientY, items);
 });
@@ -1158,7 +1251,9 @@ lanesEl.addEventListener('contextmenu', e => {
       { label: 'Wklej w miejscu głowicy', key: keyLabel('paste'), disabled: !clipboard, act: () => paste() },
       { label: 'Duplikuj', key: keyLabel('duplicate'), act: duplicateSelected },
       '-',
-      { label: c.group ? 'Rozłącz obraz i dźwięk' : 'Połącz zaznaczone', key: keyLabel('link'), disabled: !c.group && n < 2, act: toggleLink },
+      { label: 'Połącz w jeden klip', key: keyLabel('link'), disabled: n < 2, act: joinSelected },
+      ...(isVisual(c) ? [{ label: 'Obróć w prawo o 90°', act: () => rotateClips(selectedClips(), 90) }, { label: 'Obróć w lewo o 90°', act: () => rotateClips(selectedClips(), -90) }] : []),
+      ...(c.group ? [{ label: 'Rozłącz', key: keyLabel('unlink'), act: unlinkSelected }] : []),
     ];
     if (c.kind === 'video') {
       items.push({ label: 'Rozdziel obraz i dźwięk', key: keyLabel('detach'), disabled: !media.get(c.mediaId)?.hasAudio || (c.props.detached && groupMembers(c).length < 2), act: splitAV });
@@ -1186,13 +1281,14 @@ lanesEl.addEventListener('contextmenu', e => {
       { label: 'Usuń tę przerwę', disabled: !inGap || tr.locked, act: () => closeGapAt(tr.id, t) },
       { label: 'Dodaj znacznik tutaj', act: () => addMarker(t) },
       ...(tr.kind === 'text' ? [{ label: 'Dodaj napis tutaj', act: () => addTextClip(null, t, tr.id) }] : []),
+      ...(tr.kind === 'note' ? [{ label: 'Dodaj komentarz tutaj', act: () => addComment(t, tr.id) }] : []),
       ...(tr.kind === 'video' ? [{ label: 'Dodaj czarną planszę tutaj', act: () => addColorClip('black', t, tr.id) }] : []),
     ]);
   }
 });
 
 /* Przeciąganie z biblioteki */
-const DRAG_TYPES = ['text/x-kadr-media', 'text/x-kadr-title', 'text/x-kadr-solid', 'text/x-kadr-trans', 'text/x-kadr-asset'];
+const DRAG_TYPES = ['text/x-kadr-media', 'text/x-kadr-title', 'text/x-kadr-solid', 'text/x-kadr-trans', 'text/x-kadr-filter', 'text/x-kadr-asset'];
 lanesEl.addEventListener('dragover', e => {
   if (!DRAG_TYPES.some(t => e.dataTransfer.types.includes(t))) return;
   e.preventDefault();
@@ -1215,13 +1311,14 @@ lanesEl.addEventListener('drop', e => {
   const t = snapTime(timeFromX(e.clientX), snapTargets(new Set()), true).t;
   // upuszczenie na pasie „nowa ścieżka” tworzy ścieżkę odpowiedniego rodzaju
   let trackId = lane?.dataset.track;
-  if (lane?.dataset.new && type !== 'text/x-kadr-trans') {
+  if (lane?.dataset.new && type !== 'text/x-kadr-trans' && type !== 'text/x-kadr-filter') {
     const kind = type === 'text/x-kadr-media' ? (media.get(id)?.kind || 'video') : type === 'text/x-kadr-title' ? 'text' : type === 'text/x-kadr-asset' ? assetLaneKind(id) : 'video';
     trackId = addTrack(laneKind(kind), false).id;
   }
   if (type === 'text/x-kadr-media') placeMedia(media.get(id), { t, trackId, mode: e.ctrlKey ? 'insert' : 'overwrite' });
   else if (type === 'text/x-kadr-title') addTextClip(id, t, trackId);
   else if (type === 'text/x-kadr-trans') { if (lane && !lane.dataset.new) dropTransition(id, lane.dataset.track, t); }
+  else if (type === 'text/x-kadr-filter') { if (lane && !lane.dataset.new) dropFilter(id, lane.dataset.track, timeFromX(e.clientX)); }
   else if (type === 'text/x-kadr-asset') useAsset(id, t, trackId);
   else addColorClip(id, t, trackId);
 });

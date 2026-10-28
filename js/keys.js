@@ -219,8 +219,8 @@ const COMMANDS = [
   { id: 'paste', g: 'edit', label: 'Wklej w miejscu głowicy (nadpisz)', short: 'Wklej', keys: ['ctrl+v'], run: () => paste() },
   { id: 'pasteInsert', g: 'edit', label: 'Wklej z rozsunięciem reszty', short: 'Wklej+rozsuń', keys: ['ctrl+shift+v'], run: pasteInsert },
   { id: 'duplicate', g: 'edit', label: 'Duplikuj', short: 'Duplikuj', keys: ['ctrl+d'], run: duplicateSelected },
-  { id: 'link', g: 'edit', label: 'Połącz / rozłącz obraz z dźwiękiem', short: 'Połącz', keys: ['ctrl+g'], run: toggleLink },
-  { id: 'anim', g: 'edit', label: 'Tryb animacji (zmiany jako klatki kluczowe)', short: 'Animuj', keys: ['alt+a'], run: () => toggleAnim() },
+  { id: 'link', g: 'edit', label: 'Połącz zaznaczone w jeden klip', short: 'Połącz', keys: ['ctrl+g'], run: joinSelected },
+  { id: 'unlink', g: 'edit', label: 'Rozłącz połączone klipy', short: 'Rozłącz', keys: ['ctrl+shift+g'], run: unlinkSelected },
   { id: 'record', g: 'edit', label: 'Nagrywanie głosu z mikrofonu (otwórz panel / start / stop)', short: 'Nagraj głos', keys: ['shift+r'], run: () => (rec.dlg?.open ? (recRecording() ? recStop() : recStart()) : openRecorder()) },
   { id: 'detach', g: 'edit', label: 'Rozdziel obraz i dźwięk filmu', short: 'Rozdziel', keys: ['ctrl+shift+u'], run: () => splitAV() },
   { id: 'toggleOff', g: 'edit', label: 'Wyłącz / włącz klip', short: 'Wył. klip', keys: ['shift+e'], run: toggleClipsOff },
@@ -228,6 +228,7 @@ const COMMANDS = [
   { id: 'freeze', g: 'edit', label: 'Stopklatka w miejscu głowicy (2 s)', short: 'Stopklatka', keys: ['shift+f'], run: () => freezeFrame() },
   { id: 'matchFrame', g: 'edit', label: 'Pokaż tę klatkę w monitorze źródła', short: 'Klatka źródła', keys: ['f'], run: matchFrame },
   { id: 'addText', g: 'edit', label: 'Dodaj napis', short: 'Napis', keys: ['t'], run: () => addTextClip() },
+  { id: 'comment', g: 'edit', label: 'Dodaj komentarz (nie pojawia się w filmie)', short: 'Komentarz', keys: ['n'], run: () => addComment() },
   { id: 'volDown', g: 'edit', label: 'Ścisz zaznaczone o 1 dB', short: '−1 dB', keys: ['['], rep: true, run: () => volumeStep(-1) },
   { id: 'volUp', g: 'edit', label: 'Podgłośnij zaznaczone o 1 dB', short: '+1 dB', keys: [']'], rep: true, run: () => volumeStep(1) },
   { id: 'undo', g: 'edit', label: 'Cofnij', short: 'Cofnij', keys: ['ctrl+z'], rep: true, run: undo },
@@ -252,7 +253,6 @@ const COMMANDS = [
   { id: 'zoomIn', g: 'view', label: 'Powiększ oś czasu', short: 'Powiększ', keys: ['=', 'shift+=', 'num+'], rep: true, run: () => setZoom(pps * 1.3) },
   { id: 'zoomOut', g: 'view', label: 'Pomniejsz oś czasu', short: 'Pomniejsz', keys: ['-', 'num-'], rep: true, run: () => setZoom(pps / 1.3) },
   { id: 'zoomFit', g: 'view', label: 'Dopasuj oś do okna', short: 'Dopasuj', keys: ['\\', 'shift+z'], run: zoomFit },
-  { id: 'snap', g: 'view', label: 'Przyciąganie wł./wył.', short: 'Przyciąganie', keys: ['n'], run: () => toggleSnap() },
   { id: 'guides', g: 'view', label: 'Siatka i strefy bezpieczne', short: 'Siatka', keys: ['g'], run: () => toggleGuides() },
   { id: 'fullscreen', g: 'view', label: 'Podgląd na pełnym ekranie', short: 'Pełny ekran', keys: ['`'], run: toggleFullscreen },
   { id: 'monSwap', g: 'view', label: 'Przełącz monitor program / źródło', short: 'Monitor', keys: ['ctrl+`'], run: () => setMonitor(monitor === 'program' ? 'source' : 'program') },
@@ -387,9 +387,9 @@ document.addEventListener('keydown', e => {
 
 /* Podpowiedzi przy przyciskach i atrybuty aria-keyshortcuts */
 const HINTS = {
-  btnPlay: 'play', btnSplit: 'split', btnDelete: 'delete', btnRipple: 'rippleDelete', btnLink: 'link', btnSplitAV: 'detach', btnRecord: 'record', btnFreeze: 'freeze', btnAnim: 'anim', btnMarker: 'marker',
+  btnPlay: 'play', btnSplit: 'split', btnDelete: 'delete', btnRipple: 'rippleDelete', btnLink: 'link', btnSplitAV: 'detach', btnRecord: 'record', btnFreeze: 'freeze', btnComment: 'comment',
   toolRipple: 'toolRipple', toolRoll: 'toolRoll', toolSlip: 'toolSlip', btnMixer: 'mixer',
-  btnText: 'addText', btnSnap: 'snap', btnFit: 'zoomFit', toolSelect: 'toolSelect', toolBlade: 'toolBlade', btnUndo: 'undo',
+  btnText: 'addText', btnFit: 'zoomFit', toolSelect: 'toolSelect', toolBlade: 'toolBlade', btnUndo: 'undo',
   btnRedo: 'redo', btnExport: 'export', btnProjects: 'projects', btnImport: 'import', btnGuides: 'guides', btnSnapshot: 'exportFrame',
   btnFull: 'fullscreen', btnPrevEdit: 'prevEdit', btnNextEdit: 'nextEdit', btnPrev: 'frameBack', btnNext: 'frameFwd',
   btnLoop: 'loop', btnMarkIn: 'markIn', btnMarkOut: 'markOut', btnHelp: 'help', btnSettings: 'settings', srcIn: 'srcIn', srcOut: 'srcOut',

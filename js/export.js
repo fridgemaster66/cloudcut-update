@@ -258,10 +258,11 @@ async function renderFrameAt(t) {
   for (;;) {
     syncMedia();
     let busy = false;
-    for (const [id, p] of players) {
-      const c = clipById(id);
-      if (!c || c.off || c.kind !== 'video' || exportFrames?.has(id)) continue; // klatka z dekodera nie wymaga przewijania
-      if (t < c.start || t >= clipEnd(c) + (frameTails.get(id) || 0)) continue;
+    for (const c of state.clips) {
+      if (c.off || c.kind !== 'video' || exportFrames?.has(c.id)) continue; // klatka z dekodera nie wymaga przewijania
+      if (t < c.start || t >= clipEnd(c) + (frameTails.get(c.id) || 0)) continue;
+      const p = players.get(pkey(c));
+      if (!p) continue;
       const target = srcTimeOf(c, t);
       if (p.el.seeking || p.el.readyState < 2 || (Math.abs(p.el.currentTime - target) > frame() / 2 && target < (p.el.duration || 1e9) - 0.05)) { busy = true; break; }
     }
@@ -533,7 +534,7 @@ async function renderAudioMix(from, to, sr = 48000) {
   lim.out.connect(oac.destination);
   const trackIn = new Map();
   for (const tr of state.tracks) {
-    if (tr.kind === 'text') continue;
+    if (!isAudible(tr)) continue;
     const g = oac.createGain(); g.gain.value = tr.vol ?? 1;
     const p = oac.createStereoPanner(); p.pan.value = clamp(tr.pan ?? 0, -1, 1);
     g.connect(p).connect(lim);

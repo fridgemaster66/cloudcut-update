@@ -21,7 +21,7 @@ function initGL() {
       in vec2 v; out vec4 o;
       uniform sampler2D src; uniform sampler3D lut;
       uniform vec4 crop; uniform bool useLut; uniform float lutAmt; uniform float lutSize;
-      uniform bool useKey; uniform vec3 keyCol; uniform float tol; uniform float soft;
+      uniform bool useKey; uniform int nKeys; uniform vec3 keyCols[5]; uniform float tols[5]; uniform float soft;
       uniform bool useFx; uniform vec2 texel; uniform float time; uniform float pxk;
       uniform float exposure, highlights, shadows, vibrance, sharpen, glow, grain, pixel, rgbs, glitch, wave, posterize;
       uniform vec4 tintS, tintH; uniform int mirror; uniform bool invert;
@@ -54,12 +54,18 @@ function initGL() {
         }
         float a = c.a;
         if (useKey) {
-          vec3 p = c.rgb * 255.0, k = keyCol * 255.0;
+          vec3 p = c.rgb * 255.0, k = keyCols[0] * 255.0;
           float cb = -0.1687 * p.r - 0.3313 * p.g + 0.5 * p.b, cr = 0.5 * p.r - 0.4187 * p.g - 0.0813 * p.b;
-          float kcb = -0.1687 * k.r - 0.3313 * k.g + 0.5 * k.b, kcr = 0.5 * k.r - 0.4187 * k.g - 0.0813 * k.b;
-          float d = distance(vec2(cb, cr), vec2(kcb, kcr));
-          float t0 = tol * 1.3, s = max(1.0, soft * 1.3);
-          float ka = clamp((d - t0) / s, 0.0, 1.0);
+          float best = 1e9; // najbliższy z kolorów tła (odległość barwy minus jego tolerancja)
+          for (int i = 0; i < 5; i++) {
+            if (i >= nKeys) break;
+            vec3 ki = keyCols[i] * 255.0;
+            float kcb = -0.1687 * ki.r - 0.3313 * ki.g + 0.5 * ki.b, kcr = 0.5 * ki.r - 0.4187 * ki.g - 0.0813 * ki.b;
+            float m = distance(vec2(cb, cr), vec2(kcb, kcr)) - tols[i] * 1.3;
+            if (m < best) { best = m; k = ki; }
+          }
+          float s = max(1.0, soft * 1.3);
+          float ka = clamp(best / s, 0.0, 1.0);
           if (ka < 1.0) {
             // rozlew koloru tła na krawędziach
             if (k.g >= k.r && k.g >= k.b) c.g = min(c.g, max(c.r, c.b));
@@ -115,7 +121,7 @@ function initGL() {
     const loc = gl.getAttribLocation(glProg, 'p');
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    glU = Object.fromEntries(['src', 'lut', 'crop', 'useLut', 'lutAmt', 'lutSize', 'useKey', 'keyCol', 'tol', 'soft',
+    glU = Object.fromEntries(['src', 'lut', 'crop', 'useLut', 'lutAmt', 'lutSize', 'useKey', 'nKeys', 'keyCols', 'tols', 'soft',
       'useFx', 'texel', 'time', 'pxk', 'exposure', 'highlights', 'shadows', 'vibrance', 'sharpen', 'glow', 'grain', 'pixel', 'rgbs', 'glitch', 'wave',
       'posterize', 'tintS', 'tintH', 'mirror', 'invert'].map(n => [n, gl.getUniformLocation(glProg, n)]));
     glSrcTex = gl.createTexture();
@@ -175,9 +181,11 @@ function gpuEffects(src, sx, sy, cw, ch, P, t = 0) {
   }
   gl.uniform1i(glU.useKey, key ? 1 : 0);
   if (key) {
-    const [r, g, b] = hexRgb(key.color);
-    gl.uniform3f(glU.keyCol, r / 255, g / 255, b / 255);
-    gl.uniform1f(glU.tol, key.tol);
+    const ks = keyColors(key), cols = new Float32Array(15), tols = new Float32Array(5);
+    ks.forEach((k, i) => { hexRgb(k.color).forEach((v, j) => { cols[i * 3 + j] = v / 255; }); tols[i] = k.tol; });
+    gl.uniform1i(glU.nKeys, ks.length);
+    gl.uniform3fv(glU.keyCols, cols);
+    gl.uniform1fv(glU.tols, tols);
     gl.uniform1f(glU.soft, key.soft);
   }
   gl.uniform1i(glU.useFx, e ? 1 : 0);
@@ -206,8 +214,8 @@ function gpuEffects(src, sx, sy, cw, ch, P, t = 0) {
 /* =========================================================
    Pędzel kluczowania: malujesz tło na podglądzie, program dobiera kolor i tolerancję
    ========================================================= */
-const keyBrush = { on: false, clipId: null, img: null, samples: [], pts: [], radius: 22 };
-function startKeyBrush(c) {
+const keyBrush = { on: false, clipId: null, img: null, samples: [], pts: [], radius: 22, target: 0 };
+function startKeyBrush(c, target = 0) {
   if (!c || !['video', 'image'].includes(c.kind)) return;
   if (playhead < c.start - EPS || playhead >= clipEnd(c)) { toast('Ustaw głowicę na tym klipie — pędzel czyta bieżącą klatkę'); return; }
   const m = media.get(c.mediaId);
@@ -220,16 +228,16 @@ function startKeyBrush(c) {
   const g = cv.getContext('2d', { willReadFrequently: true });
   g.drawImage(src, 0, 0, cv.width, cv.height);
   keyBrush.img = { data: g.getImageData(0, 0, cv.width, cv.height).data, w: cv.width, h: cv.height };
-  Object.assign(keyBrush, { on: true, clipId: c.id, samples: [], pts: [] });
+  Object.assign(keyBrush, { on: true, clipId: c.id, samples: [], pts: [], target });
   if (!c.props.key.on) { c.props.key.on = true; drawFrame(); } // od razu widać efekt kolejnych pociągnięć
   overlay.classList.add('key-brush');
   $('#btnKeyPick')?.setAttribute('aria-pressed', 'true');
   renderInspector();
-  toast('Pomaluj tło na podglądzie (przytrzymaj i przeciągnij). Kilka pociągnięć = dokładniej. Esc kończy.', 5000);
+  toast(target === 'add' ? 'Pomaluj na podglądzie kolejny kolor tła (np. cień albo jaśniejszą część). Esc kończy.' : 'Pomaluj tło na podglądzie (przytrzymaj i przeciągnij). Kilka pociągnięć = dokładniej. Shift + pociągnięcie dodaje kolejny kolor. Esc kończy.', 5000);
 }
 function stopKeyBrush() {
   if (!keyBrush.on) return;
-  Object.assign(keyBrush, { on: false, clipId: null, img: null, samples: [], pts: [] });
+  Object.assign(keyBrush, { on: false, clipId: null, img: null, samples: [], pts: [], target: 0 });
   overlay.classList.remove('key-brush');
   $('#btnKeyPick')?.setAttribute('aria-pressed', 'false');
   drawOverlay();
@@ -249,7 +257,7 @@ function keyPickFromToolbar() {
   startKeyBrush(c);
   if (keyBrush.on) {
     $('#inspector [data-sec="key"]')?.scrollIntoView({ block: 'nearest' });
-    toast('Kliknij kolor tła na podglądzie (albo przeciągnij po tle). Kolejne kliknięcia doprecyzują. Esc albo ponowne kliknięcie pipety kończy.', 6000);
+    toast('Kliknij kolor tła na podglądzie (albo przeciągnij po tle). Kolejne kliknięcia doprecyzują, a Shift + kliknięcie doda drugi kolor. Esc albo ponowne kliknięcie pipety kończy.', 6000);
   }
 }
 function drawKeyBrush(g) {
@@ -282,6 +290,8 @@ function keyBrushSample(p) {
   keyBrush.pts.push({ x: p.x, y: p.y, r: keyBrush.radius * p.k });
 }
 function keyBrushStroke(e) {
+  const c = clipById(keyBrush.clipId);
+  if (e.shiftKey && c && keyColors(c.props.key).length < KEY_MAX) { keyBrush.target = 'add'; keyBrush.samples = []; } // Shift: następny kolor tła
   try { overlay.setPointerCapture(e.pointerId); } catch { /* np. pióro bez przechwytywania — maluje się i tak */ }
   const move = ev => { keyBrushSample(toProject(ev)); drawOverlay(); };
   const up = () => {
@@ -308,7 +318,16 @@ function applyKeyBrush() {
   const ins = S.filter((_, i) => d[i] <= lim);
   const avg = [0, 1, 2].map(k => Math.round(ins.reduce((a, s) => a + s[k], 0) / ins.length));
   const tol = clamp(Math.round(lim / 1.3 + 4), 5, 90);
-  c.props.key = { ...c.props.key, on: true, color: '#' + avg.map(v => v.toString(16).padStart(2, '0')).join(''), tol, soft: clamp(Math.round(tol * 0.5), 6, 40) };
+  const color = '#' + avg.map(v => v.toString(16).padStart(2, '0')).join('');
+  const K = c.props.key;
+  K.extra = [...(K.extra || [])];
+  if (keyBrush.target === 'add' && keyColors(K).length < KEY_MAX) {
+    K.extra.push({ color, tol });
+    keyBrush.target = K.extra.length; // kolejne pociągnięcia doprecyzowują ten nowy kolor
+    toast(`Dodano ${K.extra.length + 1}. kolor tła`, 1800);
+  } else if (typeof keyBrush.target === 'number' && keyBrush.target > 0 && K.extra[keyBrush.target - 1]) K.extra[keyBrush.target - 1] = { color, tol };
+  else c.props.key = { ...K, color, tol, soft: clamp(Math.round(tol * 0.5), 6, 40) };
+  c.props.key.on = true;
   commit();
   drawFrame();
   renderInspector();
@@ -371,7 +390,7 @@ function openMixer() {
 }
 const panLabel = p => (Math.abs(p) < 0.02 ? 'środek' : p < 0 ? `L ${Math.round(-p * 100)}` : `P ${Math.round(p * 100)}`);
 function renderMixer() {
-  const tracks = state.tracks.filter(t => t.kind !== 'text');
+  const tracks = state.tracks.filter(isAudible);
   mixerDlg.querySelector('#mixStrips').innerHTML = tracks.map(tr => `<div class="mix-strip">
       <div class="mix-name" title="${esc(tr.name)}">${esc(tr.name)}</div>
       <div class="mix-fader">
@@ -794,7 +813,6 @@ function openProMenu(anchor) {
     { label: 'Wyrównaj głośność wszystkich klipów', act: normalizeAll },
     { label: 'Odwróć klip (od końca)', act: reverseClip },
     { label: 'Rozdziały YouTube ze znaczników…', act: showChapters },
-    { label: 'Wskaźniki obrazu (histogram, wektorskop)…', act: toggleScopes },
     '-',
     { label: 'Mikser audio…', key: keyLabel('mixer'), act: openMixer },
     { label: 'Importuj LUT (.cube)…', act: () => $('#lutInput').click() },

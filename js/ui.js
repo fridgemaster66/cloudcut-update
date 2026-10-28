@@ -363,25 +363,32 @@ const SPEED_POS = 1000, SPEED_LOG = Math.log(SPEED_MAX / SPEED_MIN);
 const speedToPos = s => (s < 0 ? -1 : 1) * Math.round(SPEED_POS * Math.log(clamp(Math.abs(s), SPEED_MIN, SPEED_MAX) / SPEED_MIN) / SPEED_LOG);
 function posToSpeed(p) {
   const mag = SPEED_MIN * Math.exp(SPEED_LOG * Math.abs(p) / SPEED_POS);
-  const st = mag < 2 ? 0.01 : mag < 10 ? 0.05 : mag < 50 ? 0.5 : 1; // okrągłe wartości
+  const st = mag < 1 ? 0.05 : mag < 3 ? 0.1 : mag < 10 ? 0.5 : mag < 30 ? 1 : 5; // okrągłe wartości: 0,5× · 1,5× · 2× · 4× · 10× · 25×
   let v = Math.round(mag / st) * st;
-  if (Math.abs(v - 1) < 0.04) v = 1; // przyciąganie do normalnej prędkości
+  if (Math.abs(v - 1) < 0.06) v = 1; // przyciąganie do normalnej prędkości
   return (p < 0 ? -1 : 1) * +clamp(v, SPEED_MIN, SPEED_MAX).toFixed(2);
 }
-const speedDesc = s => (s < 0 ? `wstecz, ${fmtSpeed(-s)}×` : s === 1 ? 'normalna' : s < 1 ? `zwolnione, ${fmtSpeed(s)}×` : `przyspieszone, ${fmtSpeed(s)}×`);
+const speedWord = s => (s < 0 ? 'wstecz' : s === 1 ? 'normalna' : s < 1 ? 'zwolnione' : 'przyspieszone');
+const speedDesc = s => (s === 1 ? 'normalna, 1×' : `${speedWord(s)}, ${fmtSpeed(Math.abs(s))}×`);
+const speedVal = s => (s < 0 ? '−' : '') + fmtSpeed(Math.abs(s)) + '×';
 const SPEED_TICKS = [-100, -10, -1, 1, 10, 100];
+const speedFrac = s => 0.5 + speedToPos(s) / SPEED_POS / 2; // miejsce na suwaku (0–1)
+const thumbLeft = f => `calc(7px + (100% - 14px) * ${f.toFixed(4)})`; // środek gałki suwaka
+const bubbleLeft = s => `clamp(20px, ${thumbLeft(speedFrac(s))}, calc(100% - 20px))`; // dymek nie wychodzi poza panel
 function speedField(c) {
-  const s = c.speed, sign = s < 0 ? -1 : 1;
-  const tick = v => `<span style="left:calc(7px + (100% - 14px) * ${(0.5 + speedToPos(v) / SPEED_POS / 2).toFixed(4)})">${v < 0 ? '−' + -v : v}×</span>`; // środek gałki suwaka
+  const s = c.speed;
+  const tick = v => `<span style="left:${thumbLeft(speedFrac(v))}">${v < 0 ? '−' + -v : v}×</span>`;
   return `<div class="field spd-field">
       <div class="lbl"><label for="c-speed">Prędkość</label>
-        <span class="lbl-r"><input type="text" inputmode="decimal" class="spd-num" id="c-speedNum" data-clip="speedNum" value="${String(s).replace('.', ',')}" aria-label="Prędkość jako liczba (ujemna = wstecz)" spellcheck="false">×</span></div>
-      <input type="range" id="c-speed" data-clip="speed" min="${-SPEED_POS}" max="${SPEED_POS}" step="1" value="${speedToPos(s)}" aria-valuetext="${speedDesc(s)}">
-      <div class="spd-scale" aria-hidden="true">${SPEED_TICKS.map(tick).join('')}</div>
-      <div class="chips spd-chips">
-        <button type="button" class="chip" data-spd="flip" aria-pressed="${s < 0}">◀ Wstecz</button>
-        ${[0.5, 1, 2, 4, 10].map(v => `<button type="button" class="chip" data-spd="${v * sign}" aria-pressed="${Math.abs(s) === v}">${fmtSpeed(v)}×</button>`).join('')}
+        <output class="spd-out" id="spdOut" for="c-speed" data-word="${speedWord(s)}"><b>${speedVal(s)}</b> ${speedWord(s)}</output></div>
+      <div class="spd-slider">
+        <span class="spd-bubble" id="spdBubble" aria-hidden="true" style="left:${bubbleLeft(s)}">${speedVal(s)}</span>
+        <input type="range" id="c-speed" data-clip="speed" min="${-SPEED_POS}" max="${SPEED_POS}" step="1" value="${speedToPos(s)}" aria-valuetext="${speedDesc(s)}" title="Przeciągnij: w prawo szybciej, w lewo wolniej, za środkiem — wstecz. Dwuklik: normalna prędkość">
       </div>
+      <div class="spd-scale" aria-hidden="true">${SPEED_TICKS.map(tick).join('')}</div>
+      <div class="spd-exact"><label for="c-speedNum">Dokładnie</label>
+        <input type="text" inputmode="decimal" class="spd-num" id="c-speedNum" data-clip="speedNum" value="${String(s).replace('.', ',')}" spellcheck="false" aria-describedby="spdHint"><span aria-hidden="true">×</span>
+        <span class="spd-exact-hint">(minus = wstecz)</span></div>
       <p class="hint" id="spdHint">${speedHint(s)}</p>
       <div class="lbl spd-ramp-lbl">Rampa prędkości</div>
       <div class="chips">${Object.entries(RAMPS).map(([k, r]) => `<button type="button" class="chip${k.startsWith('burst') ? ' chip-hot' : ''}" data-ramp="${k}" title="Dzieli klip na odcinki z płynnie zmienianą prędkością">${r.name}</button>`).join('')}</div>
@@ -392,18 +399,26 @@ function speedField(c) {
       <p class="hint">Najwolniej i najszybciej dotyczy czterech pierwszych ramp; „Do 10×” mają tempo gotowe.</p>
     </div>`;
 }
-function speedHint(s) {
-  if (s < 0) return 'Klip odtwarza się od końca. ' + (s < -16 ? 'W podglądzie obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.' : 'Dźwięk też gra wstecz.');
-  if (s > 16) return 'W podglądzie powyżej 16× obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.';
-  return s === 1 ? 'Przeciągnij w lewo za środek, żeby odtwarzać wstecz.' : s < 1 ? 'Zwolnione tempo.' : 'Przyspieszone tempo.';
+function speedHint(s, cut = false) {
+  const note = cut ? ' Klip nie zmieścił się w całości przed następnym klipem — koniec nagrania jest ucięty; odsuń następny klip, żeby go odzyskać.' : '';
+  if (s < 0) return 'Klip odtwarza się od końca. ' + (s < -16 ? 'W podglądzie obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.' : 'Dźwięk też gra wstecz.') + note;
+  if (s > 16) return 'W podglądzie powyżej 16× obraz idzie skokami, a dźwięk jest wyciszony — eksport jest płynny.' + note;
+  return (s === 1 ? 'Przeciągnij w prawo, żeby przyspieszyć, w lewo — zwolnić, a za środkiem — odtwarzać wstecz.' : s < 1 ? `Klip trwa ${fmtSpeed(1 / s)} razy dłużej niż nagranie.` : `Klip trwa ${fmtSpeed(s)} razy krócej niż nagranie.`) + note;
 }
 /* Odświeżenie pola prędkości bez przebudowy inspektora (suwak trzymany myszą zostaje pod kursorem) */
-function showSpeed(s) {
-  const num = $('#c-speedNum'), r = $('#c-speed'), h = $('#spdHint');
+function showSpeed(s, cut = false) {
+  const num = $('#c-speedNum'), r = $('#c-speed'), h = $('#spdHint'), out = $('#spdOut'), bub = $('#spdBubble');
   if (num && num !== document.activeElement) num.value = String(s).replace('.', ',');
-  if (r) { r.setAttribute('aria-valuetext', speedDesc(s)); if (r !== document.activeElement) { r.value = speedToPos(s); paintRange(r); } }
-  if (h) h.textContent = speedHint(s);
-  for (const b of $$('.spd-chips [data-spd]')) b.setAttribute('aria-pressed', b.dataset.spd === 'flip' ? s < 0 : Math.abs(+b.dataset.spd) === Math.abs(s));
+  if (r) { r.setAttribute('aria-valuetext', speedDesc(s)); if (r !== document.activeElement) r.value = speedToPos(s); paintRange(r); }
+  if (out) { out.innerHTML = `<b>${speedVal(s)}</b> ${speedWord(s)}`; out.dataset.word = speedWord(s); }
+  if (bub) { bub.textContent = speedVal(s); bub.style.left = bubbleLeft(s); }
+  if (h) h.textContent = speedHint(s, cut);
+}
+/* Czy klip skrócił się względem pełnej długości przy tej prędkości (bo dalej leży następny klip albo kończy się plik) */
+function speedCut(c, base) {
+  const o = base?.get(c.id);
+  if (!o) return false;
+  return c.dur < o.dur * Math.abs(o.speed) / Math.abs(c.speed) - frame();
 }
 let speedBase = null; // klipy sprzed przeciągania suwaka prędkości
 
@@ -523,23 +538,38 @@ function multiInspector() {
   const s = selectedClips();
   const vis = s.filter(isVisual).length;
   return `<p class="insp-title">Zaznaczono ${s.length} klipy</p><p class="insp-sub">${shortDur(Math.max(...s.map(clipEnd)) - Math.min(...s.map(c => c.start)))} łącznie</p>` +
-    (vis ? sec('looks', 'Filtr dla wszystkich', `<div class="chips">${LOOKS.map(l => `<button class="chip" data-look="${l.key}">${l.name}</button>`).join('')}</div>`) : '') +
+    (vis ? sec('looks', 'Filtr dla wszystkich', `<div class="field"><label for="m-filter">Filtr</label><select id="m-filter" data-filtersel>${opts([['', 'Bez filtra'], ...FILTERS.map(f => [f.id, f.name])], '')}</select></div>
+      <p class="hint">Wszystkie filtry z podglądem są w zakładce Przejścia → Filtry.</p>`) : '') +
     `<div class="insp-actions">
-      <button class="btn small" data-act="link">${s.some(c => c.group) ? 'Rozłącz' : 'Połącz'}</button>
+      <button class="btn small" data-act="link">Połącz w jeden</button>
+      ${s.some(c => c.group) ? '<button class="btn small" data-act="unlink">Rozłącz</button>' : ''}
       <button class="btn small" data-act="dup">Duplikuj</button>
       <button class="btn small" data-act="copy">Kopiuj</button>
       <button class="btn small danger" data-act="del">Usuń</button>
     </div>`;
 }
 
+function noteInspector(c) {
+  return `<p class="insp-title">${ICON.note.replace('<svg', '<svg class="insp-ic" aria-hidden="true"')}Komentarz</p>
+    <p class="insp-sub">${esc(trackOf(c).name)} · ${tc(c.start)} → ${tc(clipEnd(c))} · nie pojawia się w filmie</p>
+    <div class="field"><label for="n-text">Treść komentarza</label><textarea id="n-text" data-path="text" rows="5" placeholder="Np. tu wyciąć dłuższą pauzę, dodać muzykę…">${esc(c.props.text)}</textarea></div>
+    <div class="row2">
+      <div class="field"><label for="c-start">Początek (s)</label><input type="number" id="c-start" data-clip="start" min="0" step="0.1" value="${+c.start.toFixed(3)}"></div>
+      <div class="field"><label for="c-dur">Długość (s)</label><input type="number" id="c-dur" data-clip="dur" min="0.04" step="0.1" value="${+c.dur.toFixed(3)}"></div>
+    </div>
+    <div class="insp-actions">
+      <button class="btn small" data-act="dup">Duplikuj</button>
+      <button class="btn small danger" data-act="del">Usuń</button>
+    </div>`;
+}
 function clipInspector(c) {
   fillDefaults(c);
+  if (c.kind === 'note') return noteInspector(c);
   const P = c.props;
   const m = media.get(c.mediaId);
   const kindName = { video: 'Klip wideo', audio: 'Klip audio', image: 'Obraz', text: 'Napis', color: 'Plansza' }[c.kind];
   let h = `<p class="insp-title">${esc(clipLabel(c))}</p>
-    <p class="insp-sub">${kindName} · ${esc(trackOf(c).name)} · ${tc(c.start)} → ${tc(clipEnd(c))}${c.group ? ' · połączony' : ''}</p>
-    ${animMode ? `<p class="anim-banner" id="animBanner">${animBannerText()}</p>` : ''}`;
+    <p class="insp-sub">${kindName} · ${esc(trackOf(c).name)} · ${tc(c.start)} → ${tc(clipEnd(c))}${c.group ? ' · połączony' : ''}</p>`;
 
   let clipBody = `<label class="check"><input type="checkbox" data-clip="off"${c.off ? '' : ' checked'}> Klip włączony <kbd>${keyLabel('toggleOff')}</kbd></label>
     ${c.kind !== 'text' ? `<div class="field"><label for="c-name">Nazwa</label><input type="text" id="c-name" data-clip="name" value="${esc(c.name || '')}"></div>` : ''}
@@ -608,6 +638,12 @@ function clipInspector(c) {
       ${ctlRange(c, 'scale', 'Skala', 0.05, 4, 0.01, 'pct', true)}
       <div class="row2">${ctlNum(c, 'x', 'Pozycja X', 1, true)}${ctlNum(c, 'y', 'Pozycja Y', 1, true)}</div>
       ${ctlRange(c, 'rotation', 'Obrót', -180, 180, 1, 'deg', true)}
+      <div class="chips rot-chips">
+        <button type="button" class="chip" data-act="rot" data-d="-90" title="Obróć w lewo o 90°">↺ 90°</button>
+        <button type="button" class="chip" data-act="rot" data-d="90" title="Obróć w prawo o 90°">↻ 90°</button>
+        <button type="button" class="chip" data-act="rot" data-d="180" title="Obróć do góry nogami">180°</button>
+        <button type="button" class="chip" data-act="rot0" title="Bez obrotu">0°</button>
+      </div>
       ${ctlRange(c, 'opacity', 'Krycie', 0, 1, 0.01, 'pct', true)}
       ${c.kind !== 'text' ? `<div class="row2">${ctlCheck(c, 'flipH', 'Odbij poziomo')}${ctlCheck(c, 'flipV', 'Odbij pionowo')}</div>
       ${ctlRange(c, 'radius', 'Zaokrąglenie rogów', 0, 400, 1, 'px')}
@@ -615,7 +651,7 @@ function clipInspector(c) {
       ${ctlSelect(c, 'blend', 'Tryb mieszania', BLENDS)}
       ${Object.keys(c.kf || {}).length ? ctlSelect(c, 'kfEase', 'Wygładzanie animacji', [['smooth', 'Płynne (domyślne)'], ['linear', 'Liniowe'], ['in', 'Przyspieszanie'], ['out', 'Hamowanie'], ['back', 'Z odbiciem'], ['bounce', 'Sprężynowanie'], ['elastic', 'Elastyczne'], ['hold', 'Skokowe (bez przejścia)']]) : ''}
       <div class="chips"><button class="chip" data-act="kenburns" title="Powolny najazd kamery przez cały klip">Efekt Kena Burnsa</button>${Object.keys(c.kf || {}).length ? '<button class="chip" data-act="clearkf">Usuń animację</button>' : ''}</div>
-      <p class="hint">◆ dodaje klatkę kluczową w miejscu głowicy — ustaw wartości w dwóch miejscach, a obiekt płynnie przejdzie między nimi. Obiekt przesuwasz i skalujesz też myszą na podglądzie.</p>`);
+      <p class="hint">◆ dodaje klatkę kluczową w miejscu głowicy — ustaw wartości w dwóch miejscach, a obiekt płynnie przejdzie między nimi. Na podglądzie obiekt przesuwasz, skalujesz rogami i obracasz kółkiem nad ramką (z Shift — co 15°).</p>`);
   }
   if (c.kind === 'video' || c.kind === 'image') {
     h += sec('crop', 'Przycięcie kadru', `<div class="row2">
@@ -637,7 +673,13 @@ function clipInspector(c) {
     const canLut = ['video', 'image', 'adjust'].includes(c.kind);
     const lutOpts = [['', 'Brak'], ...BUILTIN_LUTS.map(l => ['b:' + l.id, l.name]), ...userAssets.filter(a => a.kind === 'lut').map(a => ['u:' + a.id, a.name + ' (mój)'])];
     h += sec('color', 'Kolor i filtry', `
-      <div class="chips">${LOOKS.map(l => `<button class="chip" data-look="${l.key}">${l.name}</button>`).join('')}</div>
+      <div class="field"><label for="c-filter">Filtr</label><select id="c-filter" data-filtersel>${opts([['', 'Bez filtra'], ...FILTERS.map(f => [f.id, f.name])], P.filter || '')}</select></div>
+      ${P.punch?.amt > 0 ? `<div class="punch-box">
+        <h4 class="sub-h">Oddalenie</h4>
+        ${ctlRange(c, 'punch.at', 'Początek (od startu klipu)', 0, Math.max(0.1, +(c.dur - 0.05).toFixed(2)), 0.05, 's')}
+        <div class="row2">${ctlRange(c, 'punch.dur', 'Czas oddalania', 0.1, 3, 0.05, 's')}${ctlRange(c, 'punch.amt', 'Siła', 0.05, 0.8, 0.01, 'pct')}</div>
+        <button class="btn small" data-act="punchhere">Ustaw w miejscu głowicy</button>
+      </div>` : ''}
       ${canLut ? `<div class="field"><label for="c-lut">LUT (profesjonalna gradacja kolorów)</label><select id="c-lut" data-clip="lut">${opts(lutOpts, P.lut?.id || '')}</select></div>
       ${P.lut?.id ? ctlRange(c, 'lut.amount', 'Siła LUT', 0, 100, 1, 'pc') : ''}
       <div class="chips"><button class="chip" data-act="lutimport">Importuj .cube…</button><button class="chip" data-act="savelook">Zapisz ten kolor jako asset</button></div>` : ''}
@@ -662,7 +704,6 @@ function clipInspector(c) {
       <h4 class="sub-h">Tonowanie (kolor cieni i świateł)</h4>
       <div class="row2">${ctlColor(c, 'efx.tintS', 'Kolor cieni')}${ctlColor(c, 'efx.tintH', 'Kolor świateł')}</div>
       <div class="row2">${ctlRange(c, 'efx.tintSAmt', 'Siła w cieniach', 0, 100, 1, 'pc')}${ctlRange(c, 'efx.tintHAmt', 'Siła w światłach', 0, 100, 1, 'pc')}</div>
-      <p class="hint">Wskaźniki (histogram, przebieg, wektorskop) otworzysz przyciskiem nad podglądem.</p>
       <button class="btn small" data-act="resetlum">Wyzeruj korekcję</button>`);
   }
   if (isVisual(c)) {
@@ -694,10 +735,20 @@ function clipInspector(c) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L12 14.6 9.4 12z"/><path d="M8.2 13.2a3.5 3.5 0 0 0-4.9 4.9c-.6 1-1.5 1.7-2.3 1.9 2.3 1.3 5.6 1.2 7.4-.6a3.5 3.5 0 0 0-.2-6.2z"/></svg>
         ${brushing ? 'Zakończ malowanie' : 'Pędzel: pomaluj tło na podglądzie'}</button>
       <p class="hint">${brushing ? 'Maluj po tle, które ma zniknąć — każde pociągnięcie poprawia kolor i tolerancję. Esc kończy.' : 'Pomaluj tło pędzlem, a program sam dobierze kolor i tolerancję — albo ustaw je ręcznie poniżej.'}</p>
-      ${ctlCheck(c, 'key.on', 'Usuń tło w kolorze')}
-      <div class="row2">${ctlColor(c, 'key.color', 'Kolor tła')}
-        <div class="field"><span class="lbl">&nbsp;</span>${window.EyeDropper ? '<button class="btn small" data-act="eyedrop" title="Pobierz kolor z ekranu">Pipeta</button>' : ''}</div></div>
-      ${ctlRange(c, 'key.tol', 'Tolerancja', 0, 100, 1, 'n')}
+      ${ctlCheck(c, 'key.on', 'Usuń tło w kolorach')}
+      <div class="key-cols">
+        ${keyColors(P.key).map((k, i) => {
+          const base = i ? `key.extra.${i - 1}` : 'key', n = i + 1;
+          return `<div class="key-col">
+            <input type="color" id="${fid(base + '.color')}" data-path="${base}.color" value="${k.color}" aria-label="Kolor tła ${n}">
+            <div class="key-col-tol"><div class="lbl"><label for="${fid(base + '.tol')}">Kolor ${n} — tolerancja</label><output id="o-${fid(base + '.tol')}" data-fmt="n">${Math.round(k.tol)}</output></div>
+              <input type="range" id="${fid(base + '.tol')}" data-path="${base}.tol" min="0" max="100" step="1" value="${k.tol}"></div>
+            <button type="button" class="icon-btn sm" data-act="keyrefine" data-i="${i}" title="Doprecyzuj ten kolor pędzlem" aria-label="Doprecyzuj kolor ${n} pędzlem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L12 14.6 9.4 12z"/><path d="M8.2 13.2a3.5 3.5 0 0 0-4.9 4.9c-.6 1-1.5 1.7-2.3 1.9 2.3 1.3 5.6 1.2 7.4-.6a3.5 3.5 0 0 0-.2-6.2z"/></svg></button>
+            ${i ? `<button type="button" class="icon-btn sm" data-act="keydel" data-i="${i}" title="Usuń ten kolor" aria-label="Usuń kolor ${n}">${ICON.x}</button>` : (window.EyeDropper ? '<button type="button" class="icon-btn sm" data-act="eyedrop" title="Pobierz kolor z ekranu" aria-label="Pipeta — kolor z ekranu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 4.5 5 5"/><path d="M17 2.8a2.1 2.1 0 0 1 3 3L18.2 7.6l-1.8-1.8z"/><path d="M15.6 6.4 5 17v2.5h2.5L18.1 9"/></svg></button>' : '<span></span>')}
+          </div>`;
+        }).join('')}
+      </div>
+      ${keyColors(P.key).length < KEY_MAX ? '<button type="button" class="btn small" data-act="keyadd">+ Dodaj kolor tła (pędzlem)</button>' : '<p class="hint">To już 5 kolorów — najwięcej, ile się da.</p>'}
       ${ctlRange(c, 'key.soft', 'Zmiękczenie krawędzi', 0, 60, 1, 'n')}
       <p class="hint">Połóż ten klip na ścieżce nad tłem (np. V2 nad V1).</p>`);
   }
@@ -748,7 +799,7 @@ function clipInspector(c) {
   h += `<div class="insp-actions">
     ${c.kind === 'video' && !P.detached && m?.hasAudio ? '<button class="btn small" data-act="detach">Rozdziel obraz i dźwięk</button>' : ''}
     ${c.kind === 'video' ? '<button class="btn small" data-act="freeze">Stopklatka</button>' : ''}
-    ${c.group ? '<button class="btn small" data-act="link">Rozłącz</button>' : ''}
+    ${c.group ? '<button class="btn small" data-act="unlink">Rozłącz</button>' : ''}
     <button class="btn small" data-act="dup">Duplikuj</button>
     <button class="btn small" data-act="saveasset" title="Zapisz w „Moich assetach”, żeby użyć w innych projektach">Zapisz jako asset</button>
     <button class="btn small danger" data-act="del">Usuń</button>
@@ -775,8 +826,6 @@ function renderInspectorValues() {
     const el = box.querySelector(`[data-path="${n}"]`);
     if (el && el !== document.activeElement && hasKf(c, n)) el.value = pv(c, n, localAt(c));
   }
-  const ab = $('#animBanner');
-  if (ab) ab.textContent = animBannerText();
 }
 
 const inspEl = $('#inspector');
@@ -796,16 +845,14 @@ inspEl.addEventListener('input', e => {
   const c = single();
   if (c && el.id === 'c-speed') {
     speedBase ||= new Map(groupMembers(c).map(x => [x.id, { start: x.start, in: x.in, dur: x.dur, speed: x.speed, kf: structuredClone(x.kf || {}) }]));
-    const sp = posToSpeed(+el.value);
-    setSpeed(c, sp, speedBase);
-    showSpeed(sp);
+    setSpeed(c, posToSpeed(+el.value), speedBase);
+    showSpeed(c.speed, speedCut(c, speedBase)); // pokazuje to, co klip naprawdę dostał
     renderLanes(); syncMedia(); drawFrame();
     return;
   }
   if (!c || !el.dataset.path) return;
   const v = readVal(el);
   if (el.hasAttribute('data-kf') || canAnimate(c, el.dataset.path)) setProp(c, el.dataset.path, v); else setPath(c.props, el.dataset.path, v);
-  if (animMode && hasKf(c, el.dataset.path)) renderLanes(); // romby klatek na klipie
   const out = $('#o-' + el.id);
   if (out) out.textContent = FMT[out.dataset.fmt](v);
   if (el.dataset.path === 'text') {
@@ -834,6 +881,7 @@ inspEl.addEventListener('change', e => {
   }
   if (el.id === 'pr-fps') { state.fps = +el.value; commit(); updateClock(); drawRuler(); return; }
   if (el.id === 'pr-bg') { state.bg = el.value; commit(); drawFrame(); return; }
+  if (el.hasAttribute('data-filtersel')) { applyFilter(el.value || null, selectedClips().filter(isVisual)); $('#' + el.id)?.focus(); return; }
   const c = single();
   if (!c) return;
   if (el.dataset.clip) {
@@ -841,11 +889,14 @@ inspEl.addEventListener('change', e => {
     if (f === 'name') c.name = el.value.trim();
     else if (f === 'off') { for (const x of groupMembers(c)) x.off = !el.checked; }
     else if (f === 'lut') c.props.lut = el.value ? { id: el.value, amount: c.props.lut?.amount ?? 100 } : null;
-    else if (f === 'speed') { setSpeed(c, posToSpeed(+el.value), speedBase); speedBase = null; }
-    else if (f === 'speedNum') {
-      const v = parseFloat(String(el.value).replace(',', '.').replace('−', '-'));
+    else if (f === 'speed' || f === 'speedNum') {
+      let v = f === 'speed' ? posToSpeed(+el.value) : parseFloat(String(el.value).replace(',', '.').replace('−', '-'));
       if (!isFinite(v) || v === 0) { toast('Wpisz prędkość od −100 do 100 (bez zera), np. 2 albo −1,5'); el.value = String(c.speed).replace('.', ','); return; }
-      setSpeed(c, v);
+      const base = speedBase || new Map(groupMembers(c).map(x => [x.id, { start: x.start, in: x.in, dur: x.dur, speed: x.speed, kf: structuredClone(x.kf || {}) }]));
+      setSpeed(c, v, base);
+      speedBase = null;
+      if (Math.abs(v) > SPEED_MAX || Math.abs(v) < SPEED_MIN) toast(`Prędkość może być od ${fmtSpeed(SPEED_MIN)}× do ${SPEED_MAX}× (albo tyle samo na minusie) — ustawiono ${speedVal(c.speed)}`, 4000);
+      if (speedCut(c, base)) toast('Prędkość ustawiona, ale klip nie zmieścił się przed następnym — koniec nagrania jest ucięty. Odsuń następny klip, żeby go odzyskać.', 6000);
     }
     else {
       const v = Math.max(0, parseFloat(String(el.value).replace(',', '.')) || 0);
@@ -887,17 +938,7 @@ inspEl.addEventListener('click', async e => {
     });
     return;
   }
-  const spdBtn = e.target.closest('[data-spd]');
-  if (spdBtn) {
-    const c = single();
-    if (!c) return;
-    setSpeed(c, spdBtn.dataset.spd === 'flip' ? -c.speed : +spdBtn.dataset.spd);
-    commit(); renderAll();
-    $(`.spd-chips [data-spd="${spdBtn.dataset.spd === 'flip' ? 'flip' : c.speed}"]`)?.focus();
-    return;
-  }
   const kb = e.target.closest('[data-kfbtn]');
-  const look = e.target.closest('[data-look]');
   const place = e.target.closest('[data-place]');
   const actBtn = e.target.closest('[data-act]');
   const c = single();
@@ -916,12 +957,6 @@ inspEl.addEventListener('click', async e => {
       const keep = Object.fromEntries(LUM_KEYS.map(k => [k, x.props.efx?.[k] ?? EFX0[k]]));
       x.props.efx = { ...EFX0, ...keep, ...preset };
     }
-    commit(); renderInspector(); drawFrame();
-    return;
-  }
-  if (look) {
-    const L = LOOKS.find(l => l.key === look.dataset.look);
-    for (const x of selectedClips()) if (x.props.fx) x.props.fx = { ...FX0, ...L.fx };
     commit(); renderInspector(); drawFrame();
     return;
   }
@@ -954,9 +989,17 @@ inspEl.addEventListener('click', async e => {
   if (act === 'del') deleteSelected(false);
   else if (act === 'dup') duplicateSelected();
   else if (act === 'copy') copySelected();
-  else if (act === 'link') toggleLink();
+  else if (act === 'link') joinSelected();
+  else if (act === 'unlink') unlinkSelected();
   else if (act === 'detach' && c) splitAV();
   else if (act === 'freeze') freezeFrame();
+  else if (act === 'rot' && c) { rotateClips([c], +actBtn.dataset.d); $(`[data-act="rot"][data-d="${actBtn.dataset.d}"]`)?.focus(); }
+  else if (act === 'rot0' && c) { setProp(c, 'rotation', 0); commit(); renderInspector(); drawFrame(); $('[data-act="rot0"]')?.focus(); }
+  else if (act === 'punchhere' && c) {
+    if (playhead < c.start || playhead >= clipEnd(c)) { toast('Ustaw głowicę na tym klipie'); return; }
+    c.props.punch.at = Math.round(clamp(playhead - c.start, 0, Math.max(0, c.dur - c.props.punch.dur)) * 100) / 100;
+    commit(); renderInspector(); drawFrame();
+  }
   else if (act === 'normalize' && c) normalizeClip(c);
   else if (act === 'mute' && c) { delete c.kf.volume; c.props.volume = 0; commit(); renderInspector(); }
   else if (act === 'resetfx' && c) { c.props.fx = { ...FX0 }; c.props.lut = null; commit(); renderInspector(); drawFrame(); }
@@ -982,6 +1025,14 @@ inspEl.addEventListener('click', async e => {
     toast('Dodano powolny najazd — zmień wartości ◆ na początku lub końcu klipu');
   } else if (act === 'keybrush' && c) {
     if (keyBrush.on && keyBrush.clipId === c.id) stopKeyBrush(); else { stopKeyBrush(); startKeyBrush(c); }
+  } else if (act === 'keyadd' && c) {
+    stopKeyBrush(); startKeyBrush(c, 'add');
+  } else if (act === 'keyrefine' && c) {
+    stopKeyBrush(); startKeyBrush(c, +actBtn.dataset.i);
+  } else if (act === 'keydel' && c) {
+    c.props.key.extra = (c.props.key.extra || []).filter((_, j) => j !== +actBtn.dataset.i - 1);
+    if (keyBrush.on) keyBrush.target = 0;
+    commit(); renderInspector(); drawFrame();
   } else if (act === 'eyedrop' && c && window.EyeDropper) {
     try {
       const r = await new EyeDropper().open();
@@ -1104,17 +1155,7 @@ async function snapshotPng() {
    Przyciski
    ========================================================= */
 function toggleLoop() { loopOn = !loopOn; $('#btnLoop').setAttribute('aria-pressed', loopOn); toast(loopOn ? 'Zapętlanie włączone' : 'Zapętlanie wyłączone', 1500); }
-/* Tryb animacji: przycisk nad podglądem (Alt+A) */
-const animBannerText = () => `● Tryb animacji (${tc(playhead)}): zmień położenie, rozmiar, kolor albo treść — zapisze się w tym miejscu. Albo włącz odtwarzanie i przeciągnij obiekt na podglądzie — nagra się cały ruch.`;
-function toggleAnim(on = !animMode) {
-  animMode = on;
-  document.body.classList.toggle('anim-mode', on);
-  $('#btnAnim').setAttribute('aria-pressed', on);
-  renderInspector();
-  toast(on ? 'Tryb animacji: włącz odtwarzanie (spacja) i przeciągnij napis na podglądzie — ruch się nagra. Albo ustawiaj głowicę i zmieniaj położenie, kolor, treść.' : 'Tryb animacji wyłączony', on ? 6000 : 2000);
-}
 function toggleGuides() { guidesOn = !guidesOn; $('#btnGuides').setAttribute('aria-pressed', guidesOn); drawOverlay(); }
-function toggleSnap() { snapOn = !snapOn; $('#btnSnap').setAttribute('aria-pressed', snapOn); }
 
 $('#btnPlay').addEventListener('click', togglePlay);
 $('#btnPrevEdit').addEventListener('click', () => jumpEdit(-1));
@@ -1136,23 +1177,21 @@ $('#btnSplitAV').addEventListener('click', () => splitAV());
 $('#btnFreeze').addEventListener('click', e => freezeMenu(e.currentTarget));
 $('#btnDelete').addEventListener('click', () => deleteSelected(false));
 $('#btnRipple').addEventListener('click', () => deleteSelected(true));
-$('#btnLink').addEventListener('click', toggleLink);
-$('#btnMarker').addEventListener('click', () => addMarker());
+$('#btnLink').addEventListener('click', joinSelected);
 $('#btnText').addEventListener('click', () => addTextClip());
+$('#btnComment').addEventListener('click', () => addComment());
 $('#btnAddTrack').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, [
     { label: 'Ścieżka wideo', act: () => addTrack('video') },
     { label: 'Ścieżka audio', act: () => addTrack('audio') },
     { label: 'Ścieżka napisów', act: () => addTrack('text') },
+    { label: 'Ścieżka komentarzy', act: () => addTrack('note') },
   ]);
 });
-$('#btnSnap').addEventListener('click', toggleSnap);
 $('#btnFit').addEventListener('click', zoomFit);
 $('#zoom').addEventListener('input', e => setZoom(sliderToPps(+e.target.value)));
 $('#btnGuides').addEventListener('click', toggleGuides);
-$('#btnScopes').addEventListener('click', () => toggleScopes());
-$('#btnAnim').addEventListener('click', () => toggleAnim());
 $('#btnSnapshot').addEventListener('click', snapshotPng);
 $('#btnFull').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
@@ -1186,6 +1225,7 @@ function paintRange(el) {
   el.style.setProperty('--p', clamp((+el.value - min) / span * 100, 0, 100) + '%');
   if (min < 0 && max > 0) { el.dataset.bipolar = ''; el.style.setProperty('--c', (-min / span * 100) + '%'); }
   else { delete el.dataset.bipolar; el.style.setProperty('--c', '0%'); }
+  if (el.id === 'c-speed') el.style.setProperty('--c', speedFrac(1) * 100 + '%'); // wypełnienie od normalnej prędkości (1×) do gałki
 }
 const paintRanges = root => root.querySelectorAll?.('input[type="range"]').forEach(paintRange);
 document.addEventListener('input', e => { if (e.target.type === 'range') paintRange(e.target); }, true);
@@ -1199,8 +1239,15 @@ paintRanges(document);
 
 /* Dwuklik na suwaku we Właściwościach przywraca wartość domyślną */
 inspEl.addEventListener('dblclick', e => {
-  const el = e.target.closest('input[type="range"][data-path]');
   const c = single();
+  if (c && e.target.id === 'c-speed') {
+    setSpeed(c, c.speed < 0 ? -1 : 1);
+    commit(); renderAll();
+    $('#c-speed')?.focus();
+    toast(c.speed < 0 ? 'Prędkość: −1× (wstecz, normalne tempo)' : 'Prędkość: 1× (normalna)', 1500);
+    return;
+  }
+  const el = e.target.closest('input[type="range"][data-path]');
   if (!el || !c) return;
   const def = getPath(defaultProps(c.kind), el.dataset.path);
   if (typeof def !== 'number') return;

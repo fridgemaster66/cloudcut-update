@@ -89,7 +89,7 @@ function getBus(trackId) {
 }
 function syncBuses() {
   for (const tr of state.tracks) {
-    if (tr.kind === 'text') continue;
+    if (!isAudible(tr)) continue;
     const b = getBus(tr.id);
     b.input.gain.value = tr.vol ?? 1;
     b.pan.pan.value = clamp(tr.pan ?? 0, -1, 1);
@@ -156,9 +156,39 @@ function buildAudioFx(ac, a) {
   return { input: nodes[0], output: nodes[nodes.length - 1] };
 }
 
+/* Odcinki tego samego nagrania leżące jeden za drugim bez skoku w materiale (rampa prędkości, przecięcie) dzielą jeden
+   odtwarzacz: film gra dalej, zmienia się tylko tempo — bez przewijania na każdym cięciu, więc bez pustych klatek */
+const chainable = (a, b) => a.trackId === b.trackId && a.mediaId === b.mediaId && a.kind === b.kind && !a.off && !b.off &&
+  Math.abs(clipEnd(a) - b.start) < 0.002 && Math.abs(a.in + a.dur * a.speed - b.in) < 0.02 &&
+  !(isTransition(b.props.inType) && b.props.fadeIn > 0) && afxSig(a.props.afx) === afxSig(b.props.afx);
+let pkMemo = { sig: null, map: new Map() };
+function playerKeys() {
+  let sig = '';
+  for (const c of state.clips) if (isAV(c)) sig += `${c.id}${c.trackId}${c.mediaId}|${c.start}|${c.dur}|${c.in}|${c.speed}|${c.off ? 1 : 0}${c.props.inType}${c.props.fadeIn}${afxSig(c.props.afx)};`;
+  if (sig === pkMemo.sig) return pkMemo.map;
+  const map = new Map(), byTrack = new Map();
+  for (const c of state.clips) {
+    if (!isAV(c)) continue;
+    if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []);
+    byTrack.get(c.trackId).push(c);
+  }
+  for (const list of byTrack.values()) {
+    list.sort((a, b) => a.start - b.start);
+    let head = null, prev = null;
+    for (const c of list) {
+      if (!prev || !chainable(prev, c)) head = c.id;
+      map.set(c.id, head);
+      prev = c;
+    }
+  }
+  pkMemo = { sig, map };
+  return map;
+}
+const pkey = c => playerKeys().get(c.id) || c.id;
 function getPlayer(c) {
-  let p = players.get(c.id);
-  if (p && p.mediaId !== c.mediaId) { dropPlayer(c.id); p = null; }
+  const key = pkey(c);
+  let p = players.get(key);
+  if (p && p.mediaId !== c.mediaId) { dropPlayer(key); p = null; }
   if (!p) {
     const m = media.get(c.mediaId);
     const el = document.createElement(c.kind === 'audio' ? 'audio' : 'video');
@@ -170,7 +200,7 @@ function getPlayer(c) {
     const gain = ac.createGain();
     gain.gain.value = 0;
     p = { el, gain, src, mediaId: c.mediaId, fx: null, sig: null, bus: null };
-    players.set(c.id, p);
+    players.set(key, p);
   }
   wirePlayer(c, p);
   return p;
@@ -210,9 +240,10 @@ function dropPlayer(id) {
   players.delete(id);
 }
 function gcPlayers() {
+  const heads = new Set(playerKeys().values());
   for (const id of [...players.keys()]) {
     const c = clipById(id);
-    if (!c || !media.has(c.mediaId) || c.mediaId !== players.get(id).mediaId) dropPlayer(id);
+    if (!c || !heads.has(id) || !media.has(c.mediaId) || c.mediaId !== players.get(id).mediaId) dropPlayer(id);
   }
 }
 
@@ -310,16 +341,25 @@ function syncMedia() {
   const live = playing && rate > 0 && !scrubbing;
   frameTails = computeTails();
   if (audioCtx) syncBuses();
+  // każdym odtwarzaczem steruje jeden klip: ten pod głowicą, a jeśli żaden — najbliższy, który zaraz się zacznie
+  const keys = playerKeys(), drive = new Map(), seen = new Set();
   for (const c of state.clips) {
     if (!isAV(c) || !media.has(c.mediaId)) continue;
+    const k = keys.get(c.id) || c.id;
+    seen.add(k);
     const tail = frameTails.get(c.id) || 0;
     const active = !c.off && t >= c.start && t < clipEnd(c) + tail;
     const soon = live && c.start - t > 0 && c.start - t < 1.5;
-    if (!active && !soon) {
-      const p = players.get(c.id);
-      if (p) { if (!p.el.paused) p.el.pause(); p.gain.gain.value = 0; stopRev(p); }
-      continue;
-    }
+    if (!active && !soon) continue;
+    const d = drive.get(k);
+    if (!d || (active && (!d.active || c.start > d.c.start)) || (!active && !d.active && c.start < d.c.start)) drive.set(k, { c, active, tail });
+  }
+  for (const k of seen) {
+    if (drive.has(k)) continue;
+    const p = players.get(k);
+    if (p) { if (!p.el.paused) p.el.pause(); p.gain.gain.value = 0; stopRev(p); }
+  }
+  for (const { c, active, tail } of drive.values()) {
     const p = getPlayer(c), el = p.el;
     if (active) {
       const target = srcTimeOf(c, t);
@@ -384,8 +424,22 @@ function transitionAt(c, t, tailMode) {
   return local < P.fadeIn ? { type: P.inType, p: clamp(local / P.fadeIn, 0, 1), role: 'in' } : null;
 }
 
+let lastFullDraw = 0;
+function videoPending(t) {
+  for (const c of state.clips) {
+    if (c.kind !== 'video' || c.off || t < c.start || t >= clipEnd(c) || !media.has(c.mediaId) || exportFrames?.has(c.id)) continue;
+    if (trackOf(c)?.hidden) continue;
+    const p = players.get(pkey(c));
+    if (!p) return true;
+    if (p.seekMode && p.snapOk) continue; // przewijanie ma własną ostatnią klatkę
+    if (p.el.readyState < 2 || p.el.seeking) return true;
+  }
+  return false;
+}
 function drawFrame() {
   const t = playhead;
+  if (playing && performance.now() - lastFullDraw < 300 && videoPending(t)) { updateClock(); return; }
+  lastFullDraw = performance.now();
   ctx = mainCtx;
   ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
   ctx.globalAlpha = 1;
@@ -397,7 +451,7 @@ function drawFrame() {
   if (!playing) frameTails = computeTails();
   for (let i = state.tracks.length - 1; i >= 0; i--) {
     const tr = state.tracks[i];
-    if (tr.kind === 'audio' || tr.hidden) continue;
+    if (tr.kind === 'audio' || tr.kind === 'note' || tr.hidden) continue;
     for (const c of clipsOn(tr.id)) {
       const tail = frameTails.get(c.id) || 0;
       if (c.off || t < c.start || t >= clipEnd(c) + tail) continue;
@@ -447,17 +501,20 @@ function chromaKey(src, sx, sy, sw, sh, key) {
   keyCtx.clearRect(0, 0, w, h);
   keyCtx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
   const img = keyCtx.getImageData(0, 0, w, h), d = img.data;
-  const [kr, kg, kb] = hexRgb(key.color);
-  const kcb = -0.1687 * kr - 0.3313 * kg + 0.5 * kb, kcr = 0.5 * kr - 0.4187 * kg - 0.0813 * kb;
-  const t0 = key.tol * 1.3, soft = Math.max(1, key.soft * 1.3);
-  const dom = kg >= kr && kg >= kb ? 1 : kb >= kr ? 2 : 0; // dominujący kanał tła (rozlew koloru)
+  const ks = keyColors(key).map(k => {
+    const [kr, kg, kb] = hexRgb(k.color);
+    // dominujący kanał tła (rozlew koloru na krawędziach)
+    return { cb: -0.1687 * kr - 0.3313 * kg + 0.5 * kb, cr: 0.5 * kr - 0.4187 * kg - 0.0813 * kb, t0: k.tol * 1.3, dom: kg >= kr && kg >= kb ? 1 : kb >= kr ? 2 : 0 };
+  });
+  const soft = Math.max(1, key.soft * 1.3);
   for (let i = 0; i < d.length; i += 4) {
     const r = d[i], g = d[i + 1], b = d[i + 2];
     const cb = -0.1687 * r - 0.3313 * g + 0.5 * b, cr = 0.5 * r - 0.4187 * g - 0.0813 * b;
-    const dist = Math.hypot(cb - kcb, cr - kcr);
-    if (dist < t0) d[i + 3] = 0;
-    else if (dist < t0 + soft) {
-      d[i + 3] *= (dist - t0) / soft;
+    let best = Infinity, dom = 1;
+    for (const k of ks) { const m = Math.hypot(cb - k.cb, cr - k.cr) - k.t0; if (m < best) { best = m; dom = k.dom; } }
+    if (best < 0) d[i + 3] = 0;
+    else if (best < soft) {
+      d[i + 3] *= best / soft;
       const others = dom === 1 ? Math.max(r, b) : dom === 2 ? Math.max(r, g) : Math.max(g, b);
       if (d[i + dom] > others) d[i + dom] = others;
     }
@@ -884,6 +941,7 @@ function drawVisual(c, t, tailMode, trans) {
     // film i zdjęcie lekko powiększone, żeby przy drganiu nie było widać krawędzi kadru
     if (c.kind === 'video' || c.kind === 'image' || c.kind === 'adjust') sc *= 1 + (P.shake.amt || 0) / 100 * 0.12 + Math.abs(P.shake.rot || 0) / 100 * 0.06;
   }
+  if (P.punch?.amt > 0) sc *= punchScale(P.punch, local);
   if (alpha <= 0.002 || sc <= 0.002) return;
 
   let R, paint;
@@ -1047,6 +1105,13 @@ function layoutStage() {
   drawOverlay();
 }
 
+const ROT_HANDLE = 26; // odległość uchwytu obrotu od ramki (piksele ekranu)
+/* Położenie uchwytu obrotu (y w układzie obiektu): nad ramką, a gdy wypadłby poza kadr (obraz na cały ekran) — tuż pod jej górną krawędzią */
+function rotHandleY(b, px) {
+  const out = -b.h / 2 - ROT_HANDLE * px, a = b.rot * Math.PI / 180;
+  const x = b.cx - out * Math.sin(a), y = b.cy + out * Math.cos(a);
+  return x > 0 && x < state.w && y > 0 && y < state.h ? out : -b.h / 2 + ROT_HANDLE * px;
+}
 function drawOverlay() {
   const k = overlay.width / state.w;
   octx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1085,6 +1150,12 @@ function drawOverlay() {
     octx.fillStyle = '#ffd34d';
     const hs = 9 * px;
     for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) octx.fillRect(x * b.w / 2 - hs / 2, y * b.h / 2 - hs / 2, hs, hs);
+    // uchwyt obrotu: kółko nad górną krawędzią
+    const ry = rotHandleY(b, px);
+    octx.lineWidth = 1.5 * px;
+    octx.beginPath(); octx.moveTo(0, -b.h / 2); octx.lineTo(0, ry); octx.stroke();
+    octx.beginPath(); octx.arc(0, ry, 6 * px, 0, Math.PI * 2);
+    octx.fillStyle = '#11141a'; octx.fill(); octx.stroke();
     octx.restore();
   }
 }
@@ -1099,10 +1170,11 @@ function boxLocal(b, p) {
   return { x: dx * Math.cos(a) - dy * Math.sin(a), y: dx * Math.sin(a) + dy * Math.cos(a) };
 }
 function hitPreview(p) {
-  // uchwyty skalowania zaznaczonego obiektu mają pierwszeństwo
+  // uchwyty zaznaczonego obiektu (obrót, skalowanie) mają pierwszeństwo
   for (const b of [...previewBoxes].reverse()) {
     if (!sel.has(b.id)) continue;
     const l = boxLocal(b, p), tol = 12 * p.k;
+    if (Math.hypot(l.x, l.y - rotHandleY(b, p.k)) < tol) return { b, mode: 'rotate' };
     if (Math.abs(Math.abs(l.x) - b.w / 2) < tol && Math.abs(Math.abs(l.y) - b.h / 2) < tol) return { b, mode: 'scale' };
   }
   for (const b of [...previewBoxes].reverse()) {
@@ -1113,64 +1185,12 @@ function hitPreview(p) {
 }
 
 overlay.addEventListener('pointermove', e => {
-  if ((playing && !animMode) || e.buttons) return; // w trybie animacji obiekt da się złapać także w trakcie odtwarzania
+  if (playing || e.buttons) return;
   const h = hitPreview(toProject(e));
-  overlay.className = h ? (h.mode === 'scale' ? 'can-scale' : 'can-move') : '';
+  overlay.className = h ? 'can-' + h.mode : '';
 });
-/* Nagrywanie ruchu (jak Motion Sketch w After Effects): w trybie animacji, podczas odtwarzania, przeciągasz obiekt
-   na podglądzie, a jego położenie zapisuje się co 1/12 s jako klatki kluczowe — film powtórzy dokładnie ten ruch */
-function motionRecord(e) {
-  const p0 = toProject(e);
-  const h = hitPreview(p0);
-  if (!h) return;
-  const c = clipById(h.b.id);
-  if (!c || isLocked(c)) return;
-  if (!sel.has(c.id)) { sel = new Set([c.id]); renderLanes(); }
-  const local0 = localAt(c);
-  const ox = pv(c, 'x', local0), oy = pv(c, 'y', local0);
-  c.kf ??= {};
-  // bez wcześniejszego ruchu: obiekt stoi w swoim miejscu od początku klipu do chwili, gdy go złapiesz
-  for (const k of ['x', 'y']) if (!hasKf(c, k)) c.kf[k] = local0 > frame() / 2 ? [{ t: 0, v: c.props[k] }] : [];
-  if (c.props.kfEase === 'smooth') c.props.kfEase = 'linear'; // nagrany ruch bez zwalniania na każdym punkcie
-  let pos = { x: ox, y: oy }, last = null, n = 0;
-  const put = (k, t, v) => {
-    const a = c.kf[k];
-    for (let i = a.length - 1; i >= 0; i--) if (a[i].t > (last ?? local0 - 1e-6) && a[i].t <= t + 1e-6) a.splice(i, 1); // nagranie zastępuje stary ruch
-    a.push({ t, v });
-    a.sort((x, y) => x.t - y.t);
-  };
-  const sample = (force = false) => {
-    if (!playing || playhead >= clipEnd(c)) { stop(); return; }
-    const t = Math.round(localAt(c) * 1000) / 1000;
-    if (!force && last !== null && t - last < 1 / 12) return;
-    put('x', t, Math.round(pos.x)); put('y', t, Math.round(pos.y));
-    last = t; n++;
-  };
-  try { overlay.setPointerCapture(e.pointerId); } catch { /* bez przechwytywania też nagrywa */ }
-  overlay.classList.add('rec-motion');
-  const timer = setInterval(sample, 1000 / 24); // obiekt trzymany w miejscu też się nagrywa
-  const mv = ev => { const p = toProject(ev); pos = { x: ox + (p.x - p0.x), y: oy + (p.y - p0.y) }; sample(); };
-  let done = false;
-  const stop = () => {
-    if (done) return;
-    done = true;
-    clearInterval(timer);
-    overlay.classList.remove('rec-motion');
-    overlay.removeEventListener('pointermove', mv);
-    overlay.removeEventListener('pointerup', up);
-    overlay.removeEventListener('pointercancel', up);
-    commit(); renderLanes(); renderInspector();
-    if (n) toast(`Nagrano ruch: ${plural(n, 'punkt', 'punkty', 'punktów')} — odtwórz, żeby zobaczyć animację`, 4000);
-  };
-  const up = () => { if (playing && playhead < clipEnd(c)) sample(true); stop(); };
-  overlay.addEventListener('pointermove', mv);
-  overlay.addEventListener('pointerup', up);
-  overlay.addEventListener('pointercancel', up);
-  sample(true);
-}
 overlay.addEventListener('pointerdown', e => {
   if (typeof keyBrush !== 'undefined' && keyBrush.on && e.button === 0) { keyBrushStroke(e); return; } // pędzel kluczowania
-  if (playing && animMode && e.button === 0) { motionRecord(e); return; } // nagrywanie ruchu w trybie animacji
   if (playing || e.button !== 0) return;
   const p0 = toProject(e);
   const h = hitPreview(p0);
@@ -1179,8 +1199,9 @@ overlay.addEventListener('pointerdown', e => {
   if (isLocked(c)) { toast('Ścieżka tego obiektu jest zablokowana'); return; }
   if (!sel.has(c.id)) { sel = new Set([c.id]); renderLanes(); renderInspector(); drawFrame(); }
   const local = localAt(c);
-  const ox = pv(c, 'x', local), oy = pv(c, 'y', local), os = pv(c, 'scale', local);
+  const ox = pv(c, 'x', local), oy = pv(c, 'y', local), os = pv(c, 'scale', local), orot = pv(c, 'rotation', local) || 0;
   const d0 = Math.hypot(p0.x - h.b.cx, p0.y - h.b.cy) || 1;
+  const a0 = Math.atan2(p0.y - h.b.cy, p0.x - h.b.cx);
   let moved = false;
   overlay.setPointerCapture(e.pointerId);
   const mv = ev => {
@@ -1189,6 +1210,12 @@ overlay.addEventListener('pointerdown', e => {
     if (h.mode === 'scale') {
       const s = clamp(os * Math.hypot(p.x - h.b.cx, p.y - h.b.cy) / d0, 0.02, 10);
       setProp(c, 'scale', Math.round(s * 1000) / 1000);
+    } else if (h.mode === 'rotate') {
+      let r = orot + (Math.atan2(p.y - h.b.cy, p.x - h.b.cx) - a0) * 180 / Math.PI;
+      if (ev.shiftKey) r = Math.round(r / 15) * 15; // co 15°
+      else if (!ev.altKey) { const q = Math.round(r / 90) * 90; if (Math.abs(r - q) < 4) r = q; } // przyciąganie do 0°, 90°, 180°
+      setProp(c, 'rotation', wrapDeg(Math.round(r)));
+      overlay.title = `Obrót: ${Math.round(wrapDeg(r))}°`;
     } else {
       let nx = ox + (p.x - p0.x), ny = oy + (p.y - p0.y);
       if (snapOn && !ev.altKey) {
@@ -1206,6 +1233,7 @@ overlay.addEventListener('pointerdown', e => {
     overlay.removeEventListener('pointermove', mv);
     overlay.removeEventListener('pointerup', up);
     overlay.removeEventListener('pointercancel', up);
+    overlay.removeAttribute('title');
     if (moved) { commit(); renderInspector(); renderLanes(); }
   };
   overlay.addEventListener('pointermove', mv);

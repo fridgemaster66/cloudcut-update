@@ -63,10 +63,22 @@ const TEMPLATE_DEFS = [
   { id: 'news', name: 'Wiadomości / belka', dur: 6, desc: 'Belka z nazwiskiem i paskiem' },
   { id: 'cine', name: 'Look kinowy', dur: 10, desc: 'Pasy, ziarno i warstwa koloru' },
 ];
-const ASSET_CATS = [['all', 'Wszystko'], ['shapes', 'Kształty'], ['elements', 'Elementy'], ['overlays', 'Nakładki'], ['backgrounds', 'Tła'], ['sounds', 'Dźwięki'], ['templates', 'Szablony'], ['luts', 'LUT'], ['mine', 'Moje']];
+/* Narzędzia AI (ai.js): karta w Assetach uruchamia narzędzie */
+const AI_TOOLS = [
+  { id: 'bg', name: 'Usuń tło (AI)', desc: 'Wycina osobę albo obiekt ze zdjęcia lub klatki filmu — model działa na Twoim komputerze', icon: '<path d="M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/><path d="M3 3l3 3M21 3l-3 3"/>' },
+  { id: 'tts', name: 'Lektor (tekst na mowę)', desc: 'Czyta wpisany tekst głosem z Windows i kładzie nagranie na ścieżce audio', icon: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>' },
+  { id: 'captions', name: 'Napisy AI', desc: 'Rozpoznaje mowę i tworzy napisy (Whisper, na Twoim komputerze)', icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4M13 15h4M7 11h10"/>' },
+  { id: 'silence', name: 'Usuń ciszę', desc: 'Wycina przerwy w mówieniu z zaznaczonego klipu', icon: '<path d="M3 12h3l2-5 3 10 2-5h2"/><path d="M17 9l4 6M21 9l-4 6"/>' },
+  { id: 'scenes', name: 'Wykryj ujęcia', desc: 'Znajduje zmiany ujęć w filmie i tnie w tych miejscach', icon: '<rect x="3" y="6" width="7" height="12" rx="1"/><rect x="14" y="6" width="7" height="12" rx="1"/><path d="M12 3v18"/>' },
+  { id: 'beats', name: 'Wykryj rytm', desc: 'Stawia znaczniki na uderzeniach muzyki — do cięcia w rytm', icon: '<path d="M4 18V8M8 18V4M12 18v-8M16 18V6M20 18v-5"/>' },
+  { id: 'duck', name: 'Ścisz muzykę pod głosem', desc: 'Muzyka sama cichnie, kiedy ktoś mówi', icon: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><path d="M3 10l3 3 3-3"/>' },
+  { id: 'loud', name: 'Wyrównaj głośność', desc: 'Ustawia podobną głośność wszystkich klipów', icon: '<path d="M4 15V9M8 17V7M12 19V5M16 17V7M20 15V9"/>' },
+];
+const ASSET_CATS = [['all', 'Wszystko'], ['ai', 'AI'], ['shapes', 'Kształty'], ['elements', 'Elementy'], ['overlays', 'Nakładki'], ['backgrounds', 'Tła'], ['sounds', 'Dźwięki'], ['templates', 'Szablony'], ['luts', 'LUT']];
 
 function assetCatalog() {
   const out = [];
+  for (const a of AI_TOOLS) out.push({ id: 'ai:' + a.id, cat: 'ai', name: a.name, desc: a.desc, tool: true, prev: `<div class="ap-sfx ap-ai"><svg viewBox="0 0 24 24">${a.icon}</svg></div>` });
   for (const [shape, name, patch] of SHAPE_DEFS) out.push({ id: 'shape:' + shape, cat: 'shapes', name, prev: `<div class="ap-shape ap-${shape}"></div>` });
   for (const [el, name, , cat] of ELEMENT_DEFS) out.push({ id: 'el:' + el, cat, name, prev: `<div class="ap-el ap-${el}"></div>` });
   out.push({ id: 'adjust', cat: 'overlays', name: 'Warstwa korekcyjna', prev: '<div class="ap-el ap-adjust"></div>' });
@@ -78,7 +90,6 @@ function assetCatalog() {
   for (const t of TEMPLATE_DEFS) out.push({ id: 'tpl:' + t.id, cat: 'templates', name: t.name, desc: t.desc, prev: `<div class="ap-tpl ap-tpl-${t.id}"><span>${esc(t.name)}</span></div>` });
   for (const l of BUILTIN_LUTS) out.push({ id: 'lut:b:' + l.id, cat: 'luts', name: l.name, prev: `<div class="ap-lut" style="background:${l.css}"></div>` });
   out.push({ id: 'lut-import', cat: 'luts', name: 'Importuj LUT (.cube)', prev: '<div class="ap-sfx"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg></div>' });
-  for (const a of userAssets) out.push({ id: 'my:' + a.id, cat: 'mine', name: a.name, fav: a.fav, prev: myAssetPreview(a), my: a });
   return out;
 }
 function assetLaneKind(id) {
@@ -89,6 +100,7 @@ function assetLaneKind(id) {
 
 /* ---------------- Użycie assetu ---------------- */
 async function useAsset(id, t = playhead, trackId = null) {
+  if (id.startsWith('ai:')) { runAiTool(id.slice(3)); return; }
   try {
     if (id.startsWith('shape:')) {
       const def = SHAPE_DEFS.find(d => d[0] === id.slice(6));
@@ -351,7 +363,7 @@ $('#lutInput').addEventListener('change', async e => {
     const a = { id: uid('a'), kind: 'lut', name: f.name.replace(/\.cube$/i, ''), data: lut, fav: false };
     await Store.putAsset(a);
     await loadUserAssets();
-    toast(`Zaimportowano LUT „${a.name}” (${lut.size}³) — jest w kategorii LUT i „Moje”`);
+    toast(`Zaimportowano LUT „${a.name}” (${lut.size}³) — jest w zakładce Biblioteka`);
     if (selectedClips().some(c => ['video', 'image', 'adjust'].includes(c.kind))) applyLut('u:' + a.id);
   } catch (err) { toast('Nie udało się wczytać LUT: ' + err.message, 5000); }
 });
@@ -401,7 +413,7 @@ async function saveLookAsAsset(c) {
   const lum = c.props.efx ? Object.fromEntries(LUM_KEYS.map(k => [k, c.props.efx[k] ?? EFX0[k]])) : null;
   await Store.putAsset({ id: uid('a'), kind: 'look', name: name.trim(), data: { fx: c.props.fx, lut: c.props.lut, lum }, fav: false });
   await loadUserAssets();
-  toast('Zapisano zestaw kolorów — kliknij go w „Moje”, żeby nałożyć na zaznaczone klipy');
+  toast('Zapisano zestaw kolorów — kliknij go w zakładce Biblioteka, żeby nałożyć na zaznaczone klipy');
 }
 async function saveMediaAsAsset(m, name = m.name) {
   toast('Zapisuję plik w bibliotece…', 1500);
@@ -472,8 +484,8 @@ function renderAssets() {
   const cats = assetCat === 'all' ? ASSET_CATS.slice(1).map(c => c[0]) : [assetCat];
   const html = cats.map(cat => {
     const items = all.filter(a => a.cat === cat);
-    if (!items.length) return cat === 'mine' && assetCat === 'mine' ? '<p class="panel-hint">Tu trafiają Twoje zapisane assety: style napisów, zestawy kolorów, pliki i LUT. Prawy przycisk na klipie → „Zapisz jako asset”.</p>' : '';
-    return `<h3 class="bin-h">${ASSET_CATS.find(c => c[0] === cat)[1]}</h3><div class="preset-grid">${items.map(a => `<div class="p-card a-card" draggable="true" data-asset="${esc(a.id)}" tabindex="0" role="button" title="${esc(a.desc || a.name)} — kliknij albo przeciągnij na oś">
+    if (!items.length) return '';
+    return `<h3 class="bin-h">${ASSET_CATS.find(c => c[0] === cat)[1]}</h3><div class="preset-grid">${items.map(a => `<div class="p-card a-card${a.tool ? ' ai-card' : ''}" draggable="${!a.tool}" data-asset="${esc(a.id)}" tabindex="0" role="button" title="${esc(a.desc || a.name)}${a.tool ? ' — kliknij, żeby uruchomić' : ' — kliknij albo przeciągnij na oś'}">
         <div class="p-prev a-prev">${a.prev}${a.sound ? `<button type="button" class="a-play" data-play="${esc(a.id)}" aria-label="Odsłuchaj ${esc(a.name)}" title="Odsłuchaj">▶</button>` : ''}${a.my ? `<button type="button" class="a-fav${a.fav ? ' on' : ''}" data-fav="${a.my.id}" aria-label="Ulubiony" title="Ulubiony">★</button><button type="button" class="a-del" data-mydel="${a.my.id}" aria-label="Usuń ${esc(a.name)}" title="Usuń">${ICON.x}</button>` : ''}</div>
         <span class="p-name">${esc(a.name)}</span></div>`).join('')}</div>`;
   }).join('');

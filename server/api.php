@@ -536,6 +536,22 @@ try {
         }
     }
 
+    if ($r === 'ai') {
+        require_once __DIR__ . '/tts.php';
+        userId();
+        $sub = $seg[1] ?? '';
+        try {
+            if ($sub === 'voices' && $method === 'GET') out(200, ['voices' => ttsVoices()]);
+            if ($sub === 'tts' && $method === 'POST') {
+                $b = body();
+                $wav = ttsSpeak((string) ($b['text'] ?? ''), (string) ($b['voice'] ?? ''), (int) ($b['rate'] ?? 0));
+                out(200, ['audio' => base64_encode($wav)]);
+            }
+        } catch (TtsError $e) {
+            fail(422, $e->getMessage());
+        }
+    }
+
     if ($r === 'github' || $r === 'update') $GLOBALS['ghNoWait'] = true;
 
     if ($r === 'youtube') {

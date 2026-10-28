@@ -30,6 +30,7 @@ const ICON = {
   link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   text: '<svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
+  note: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>',
 };
 
 /* ---------------- Stan ---------------- */
@@ -115,8 +116,11 @@ function hexRgb(h) {
 const trackOf = c => state.tracks.find(t => t.id === c.trackId);
 const clipById = id => state.clips.find(c => c.id === id);
 const clipsOn = trackId => state.clips.filter(c => c.trackId === trackId).sort((a, b) => a.start - b.start);
-const laneKind = kind => (kind === 'audio' ? 'audio' : kind === 'text' ? 'text' : 'video');
-const projectEnd = () => state.clips.reduce((m, c) => Math.max(m, c.start + c.dur), 0);
+const laneKind = kind => (kind === 'audio' ? 'audio' : kind === 'text' ? 'text' : kind === 'note' ? 'note' : 'video');
+/* Komentarze leżą na własnej ścieżce i nie wydłużają filmu */
+const projectEnd = () => state.clips.reduce((m, c) => (c.kind === 'note' ? m : Math.max(m, c.start + c.dur)), 0);
+const timelineEnd = () => state.clips.reduce((m, c) => Math.max(m, c.start + c.dur), 0);
+const isAudible = tr => tr.kind === 'video' || tr.kind === 'audio'; // ścieżki z szyną dźwięku
 const isAV = c => c.kind === 'video' || c.kind === 'audio';
 /* Prędkość klipu od −100× do 100×; ujemna = odtwarzanie wstecz. c.in to zawsze miejsce w pliku na początku klipu,
    więc materiał w chwili t to c.in + (t − c.start) · c.speed — także przy prędkości ujemnej. */
@@ -125,7 +129,7 @@ const fmtSpeed = s => String(+(+s).toFixed(Math.abs(s) < 10 ? 2 : 1)).replace('.
 /* Zapas materiału (w sekundach osi czasu) przed początkiem i za końcem klipu */
 function roomBefore(c, m) { const D = m?.duration ?? Infinity; return c.speed > 0 ? c.in / c.speed : (D - c.in) / -c.speed; }
 function roomAfter(c, m) { const D = m?.duration ?? Infinity, end = c.in + c.dur * c.speed; return Math.max(0, c.speed > 0 ? (D - end) / c.speed : end / -c.speed); }
-const isVisual = c => c.kind !== 'audio';
+const isVisual = c => c.kind !== 'audio' && c.kind !== 'note';
 const clipEnd = c => c.start + c.dur;
 const selectedClips = () => state.clips.filter(c => sel.has(c.id));
 const isLocked = c => !!trackOf(c)?.locked;
@@ -166,11 +170,12 @@ function visualProps() {
     opacity: 1, scale: 1, x: 0, y: 0, rotation: 0, flipH: false, flipV: false, fit: 'contain',
     crop: { l: 0, r: 0, t: 0, b: 0 }, radius: 0, dropShadow: false, blend: 'source-over', kfEase: 'smooth',
     mask: { type: 'none', x: 0, y: 0, w: 60, h: 60, feather: 0, invert: false, round: 0 }, lut: null,
-    fx: { ...FX0 }, efx: { ...EFX0 }, shake: { ...SHAKE0 }, key: { on: false, color: '#00d046', tol: 28, soft: 12 },
+    fx: { ...FX0 }, efx: { ...EFX0 }, shake: { ...SHAKE0 }, punch: { ...PUNCH0 }, filter: null, key: { on: false, color: '#00d046', tol: 28, soft: 12 },
     inType: 'fade', outType: 'fade', fadeIn: 0, fadeOut: 0,
   };
 }
 function defaultProps(kind) {
+  if (kind === 'note') return { text: '' };
   if (kind === 'audio') return { volume: 1, fadeIn: 0, fadeOut: 0, inType: 'fade', outType: 'fade', afx: { ...AFX0 }, kfEase: 'smooth' };
   const p = visualProps();
   if (kind === 'video') Object.assign(p, { volume: 1, detached: false, afx: { ...AFX0 } });
@@ -204,6 +209,7 @@ function newClip(kind, trackId, start, dur, extra = {}) {
 }
 function clipLabel(c) {
   if (c.kind === 'text') return (c.props.text.split('\n')[0] || 'Napis');
+  if (c.kind === 'note') return (c.props.text.trim().split('\n')[0] || 'Komentarz');
   if (c.kind === 'color') return c.name || 'Plansza';
   if (c.kind === 'shape') return c.name || 'Kształt';
   if (c.kind === 'element') return c.name || 'Element';
@@ -216,8 +222,6 @@ const KF_PROPS = ['opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'size', 's
 /* Właściwości tekstowe też mogą się animować: kolor płynnie przechodzi, treść napisu zmienia się skokowo */
 const KF_STR = ['text', 'color'];
 const KF_EXTRA = ['size', 'spacing', 'text', 'color']; // rysowanie bierze je z klatek kluczowych (animProps)
-/* Tryb animacji (jak nagrywanie klatek w After Effects): każda zmiana właściwości zapisuje się w miejscu głowicy */
-let animMode = false;
 const canAnimate = (c, name) => (KF_PROPS.includes(name) || KF_STR.includes(name)) && c.props[name] !== undefined && !(name === 'color' && c.kind !== 'text');
 function mixHexColor(a, b, p) {
   const A = hexRgb(a), B = hexRgb(b);
@@ -274,17 +278,18 @@ function kfIndexAt(c, name, local) {
 }
 function setProp(c, name, v) {
   const animatable = KF_PROPS.includes(name) || KF_STR.includes(name);
-  const onClip = playhead >= c.start - EPS && playhead <= clipEnd(c) + EPS;
   if (animatable && hasKf(c, name)) {
     const local = snapLocal(c), k = c.kf[name], i = kfIndexAt(c, name, local);
     if (i >= 0) k[i].v = v;
     else { k.push({ t: local, v }); k.sort((a, b) => a.t - b.t); }
-  } else if (animMode && onClip && canAnimate(c, name)) {
-    // pierwsza zmiana w trybie animacji: dotychczasowa wartość zostaje na początku klipu, nowa — w miejscu głowicy
-    const local = snapLocal(c), old = c.props[name];
-    c.kf ??= {};
-    c.kf[name] = local > frame() / 2 && old !== v ? [{ t: 0, v: old }, { t: local, v }] : [{ t: local, v }];
   } else setPath(c.props, name, v);
+}
+const wrapDeg = d => { const r = ((d + 180) % 360 + 360) % 360 - 180; return r === -180 ? 180 : r; };
+function rotateClips(clips, d) {
+  const list = clips.filter(c => isVisual(c) && !isLocked(c));
+  if (!list.length) { toast('Zaznacz obraz, film albo napis do obrócenia'); return; }
+  for (const c of list) setProp(c, 'rotation', wrapDeg(Math.round(pv(c, 'rotation', localAt(c)) || 0) + d));
+  commit(); renderInspector(); drawFrame();
 }
 function toggleKf(c, name) {
   if (playhead < c.start - EPS || playhead > clipEnd(c) + EPS) { toast('Ustaw głowicę na tym klipie, żeby dodać klatkę kluczową'); return false; }
@@ -766,16 +771,50 @@ const SOLID_PRESETS = [
   { key: 'forest', name: 'Las', p: { grad: 'linear', c1: '#134e5e', c2: '#71b280', angle: 135 } },
   { key: 'brand', name: 'Granat', p: { grad: 'radial', c1: '#24408e', c2: '#0a1230' } },
 ];
-const LOOKS = [
-  { key: 'none', name: 'Bez filtra', fx: {} },
-  { key: 'warm', name: 'Ciepły', fx: { temp: 35, saturate: 110 } },
-  { key: 'cool', name: 'Chłodny', fx: { temp: -35, saturate: 95 } },
-  { key: 'vivid', name: 'Żywy', fx: { saturate: 145, contrast: 110 } },
-  { key: 'cine', name: 'Kinowy', fx: { contrast: 115, saturate: 85, temp: -10, vignette: 35 } },
-  { key: 'vintage', name: 'Vintage', fx: { sepia: 35, contrast: 90, saturate: 80, brightness: 105, vignette: 40 } },
-  { key: 'faded', name: 'Wyblakły', fx: { contrast: 80, brightness: 110, saturate: 70 } },
-  { key: 'bw', name: 'Czarno-biały', fx: { grayscale: 100, contrast: 115 } },
-  { key: 'noir', name: 'Noir', fx: { grayscale: 100, contrast: 150, brightness: 95, vignette: 60 } },
+/* Filtry (zakładka „Przejścia”): gotowe ustawienia koloru i efektów. Nałożenie nowego cofa ustawienia poprzedniego,
+   a „Oddalenie” to ruch — kadr płynnie maleje i w jednej klatce wraca do pełnej wielkości */
+const FILTERS = [
+  { id: 'bw', name: 'Czarno-biały', cat: 'Kolor', fx: { grayscale: 100, contrast: 115 } },
+  { id: 'noir', name: 'Noir', cat: 'Kolor', fx: { grayscale: 100, contrast: 150, brightness: 95, vignette: 60 } },
+  { id: 'sepia', name: 'Sepia', cat: 'Kolor', fx: { sepia: 85, contrast: 105, vignette: 20 } },
+  { id: 'warm', name: 'Ciepły', cat: 'Kolor', fx: { temp: 35, saturate: 110 } },
+  { id: 'cool', name: 'Chłodny', cat: 'Kolor', fx: { temp: -35, saturate: 95 } },
+  { id: 'vivid', name: 'Żywy', cat: 'Kolor', fx: { saturate: 145, contrast: 110 } },
+  { id: 'faded', name: 'Wyblakły', cat: 'Kolor', fx: { contrast: 80, brightness: 110, saturate: 70 } },
+  { id: 'vintage', name: 'Vintage', cat: 'Kolor', fx: { sepia: 35, contrast: 90, saturate: 80, brightness: 105, vignette: 40 } },
+  { id: 'cine', name: 'Kinowy', cat: 'Kolor', fx: { contrast: 115, saturate: 85, temp: -10, vignette: 35 } },
+  { id: 'teal', name: 'Teal & Orange', cat: 'Kolor', fx: { contrast: 110 }, efx: { tintS: '#1f7a8c', tintSAmt: 40, tintH: '#ffad5c', tintHAmt: 35 } },
+  { id: 'golden', name: 'Złota godzina', cat: 'Kolor', fx: { temp: 45, saturate: 120, brightness: 105 }, efx: { glow: 20 } },
+  { id: 'night', name: 'Noc', cat: 'Kolor', fx: { temp: -50, brightness: 80, saturate: 60, contrast: 110, vignette: 30 } },
+  { id: 'pastel', name: 'Pastelowy', cat: 'Kolor', fx: { saturate: 70, brightness: 112, contrast: 85 } },
+  { id: 'drama', name: 'Dramatyczny', cat: 'Kolor', fx: { contrast: 140, saturate: 80, vignette: 45 }, efx: { sharpen: 20 } },
+  { id: 'neon', name: 'Neon', cat: 'Styl', fx: { saturate: 180, contrast: 120 }, efx: { glow: 40 } },
+  { id: 'matte', name: 'Matowy', cat: 'Styl', fx: { contrast: 82, saturate: 90 }, efx: { shadows: 30 } },
+  { id: 'negative', name: 'Negatyw', cat: 'Styl', efx: { invert: true } },
+  { id: 'psych', name: 'Psychodela', cat: 'Styl', fx: { hue: 120, saturate: 190 } },
+  { id: 'vhs', name: 'VHS', cat: 'Styl', efx: { grain: 35, rgb: 22, glitch: 12, wave: 6, vibrance: -20 } },
+  { id: 'glitch', name: 'Glitch', cat: 'Styl', efx: { glitch: 70, rgb: 30 } },
+  { id: 'comic', name: 'Komiks', cat: 'Styl', efx: { posterize: 70, sharpen: 60, vibrance: 40 } },
+  { id: 'dream', name: 'Sen', cat: 'Styl', efx: { glow: 60, highlights: 15, vibrance: 20 } },
+  { id: 'oldfilm', name: 'Stary film', cat: 'Styl', fx: { sepia: 60, contrast: 120, vignette: 55 }, efx: { grain: 45 } },
+  { id: 'pixel', name: '8-bit', cat: 'Styl', efx: { pixel: 40, posterize: 50 } },
+  { id: 'blur', name: 'Rozmycie', cat: 'Styl', fx: { blur: 8 } },
+  { id: 'kaleido', name: 'Kalejdoskop', cat: 'Styl', efx: { mirror: 'q' } },
+  { id: 'punch', name: 'Oddalenie', cat: 'Ruch', punch: true, desc: 'Kadr płynnie się oddala (maleje), a potem w jednej klatce wraca — bez ponownego przybliżania' },
+  { id: 'shake', name: 'Trzęsienie', cat: 'Ruch', shake: { amt: 6, freq: 9, rot: 2 } },
+  { id: 'wave', name: 'Fala', cat: 'Ruch', efx: { wave: 45 } },
+  { id: 'mirror', name: 'Lustro', cat: 'Ruch', efx: { mirror: 'h' } },
 ];
+const filterName = id => FILTERS.find(f => f.id === id)?.name || '';
+const PUNCH0 = { amt: 0, at: 0, dur: 0.6 };
+/* Kluczowanie: kolor główny + dodatkowe (np. jaśniejsza i ciemniejsza część tła, cień) — razem najwyżej 5 */
+const KEY_MAX = 5;
+const keyColors = k => [{ color: k.color, tol: k.tol }, ...(k.extra || [])].slice(0, KEY_MAX);
+/* Skala kadru dla „Oddalenia”: od 1 płynnie do (1 − siła), po czasie trwania od razu 1 */
+function punchScale(pu, local) {
+  if (!(pu?.amt > 0)) return 1;
+  const u = (local - pu.at) / Math.max(0.05, pu.dur);
+  return u >= 0 && u < 1 ? 1 - pu.amt * u * u * (3 - 2 * u) : 1;
+}
 // kroje używane w gotowych stylach — ładowane od razu ze strony głównej
 const FONTS = ['Inter', 'Montserrat', 'Bebas Neue', 'Oswald', 'Playfair Display', 'Permanent Marker', 'JetBrains Mono'];
